@@ -1,15 +1,25 @@
 #!/usr/bin/env node
-/* LifeBoard · 本地服务器：静态文件 + 局域网同步
+/* LifeBoard · 本地服务器：静态文件 + 局域网同步（http 和 https 同时开）
  *
  * 用法：node server.js         （或双击 start.cmd）
  *
- * 静态部分和以前一样，把项目目录发给浏览器。
- * 同步部分是本机的一个小数据仓库，供同一 WiFi 下的手机和电脑互相推拉：
+ * 静态部分把项目目录发给浏览器。同步部分是本机的一个小数据仓库，
+ * 供同一 WiFi 下的手机和电脑互相推拉：
  *
- *   GET  /api/health          服务信息（版本、这台电脑的局域网地址）
+ *   GET  /api/health          服务信息（版本、这台电脑的局域网地址、两个端口）
  *   POST /api/sync            提交本地数据，拿回合并后的全量数据
  *   GET  /api/images?ids=a,b  按 id 取图片（返回 dataURL）
  *   POST /api/images          上传图片（dataURL）
+ *   GET  /ca.cer              根证书，手机装它一次，之后就能信任这台电脑
+ *
+ * 为什么要 https：
+ *   浏览器只在"安全来源"（https 或 localhost）下允许注册 Service Worker。
+ *   没有 Service Worker 就没有离线缓存，手机出门打不开页面；
+ *   而 https 页面又不允许访问 http 局域网地址。
+ *   所以电脑这边必须能提供 https——这样手机只需要一个地址：
+ *   在家能同步，出门靠缓存照常打开，数据始终只有一份。
+ *   证书由 tools/make-cert.cmd 生成（自签，只在本机有效）。
+ *   没有生成证书也能跑，只是手机只能用 http、没法离线。
  *
  * 数据落在 server.js 旁边的 sync-data/：state.json 存元数据，images/ 存图片本体。
  * 合并规则：同一条记录比 updatedAt，谁新用谁；墓碑（删除记录）比 deletedAt，
@@ -18,6 +28,9 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
+const tls = require('tls');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -30,8 +43,17 @@ const DATA_DIR = process.env.LIFEBOARD_DATA
 const IMAGE_DIR = path.join(DATA_DIR, 'images');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 
+const CERT_DIR = path.join(ROOT, 'certs');
+const PFX_FILE = path.join(CERT_DIR, 'server.pfx');
+const PASS_FILE = path.join(CERT_DIR, 'pfx.pass');
+const CRT_FILE = path.join(CERT_DIR, 'server.crt');
+const CA_FILE = path.join(CERT_DIR, 'ca.cer');
+
 const START_PORT = Number(process.env.PORT) || 5173;
 const MAX_TRIES = 10;
+
+/* 运行时端口，/api/health 会把它告诉客户端 */
+const runtime = { httpPort: START_PORT, httpsPort: null };
 
 /* 同步的元数据仓库。images 只存元数据，图片本体单独放文件。 */
 const COLLECTIONS = ['boards', 'tasks', 'templates', 'tiers', 'items', 'images'];
@@ -198,6 +220,36 @@ function localAddresses() {
     });
   });
   return out;
+}
+
+/* ------------------------------------------------------------------ *
+ * HTTPS 证书
+ * ------------------------------------------------------------------ */
+
+function loadTLS() {
+  if (!fs.existsSync(PFX_FILE) || !fs.existsSync(PASS_FILE)) return null;
+  try {
+    const passphrase = fs.readFileSync(PASS_FILE, 'utf8').trim();
+    const pfx = fs.readFileSync(PFX_FILE);
+    // createSecureContext 会顺便验证密码对不对，免得等到 listen 才报错
+    tls.createSecureContext({ pfx: pfx, passphrase: passphrase });
+    let cert = null;
+    try {
+      if (fs.existsSync(CRT_FILE)) cert = new crypto.X509Certificate(fs.readFileSync(CRT_FILE));
+    } catch (err) { /* 拿不到证书信息不影响启动 */ }
+    return { pfx: pfx, passphrase: passphrase, cert: cert };
+  } catch (err) {
+    console.error('证书读取失败（HTTPS 不会开启）：' + err.message);
+    console.error('重新运行 tools\\make-cert.cmd 可以重新生成。');
+    return null;
+  }
+}
+
+/** 当前局域网 IP 有没有写进证书里；没写进去手机会报证书不匹配 */
+function certMissingIps(tlsInfo, ips) {
+  if (!tlsInfo || !tlsInfo.cert) return null;
+  const san = String(tlsInfo.cert.subjectAltName || '');
+  return ips.filter(function (ip) { return san.indexOf('IP Address:' + ip) < 0; });
 }
 
 /* ------------------------------------------------------------------ *
@@ -375,7 +427,9 @@ function handle(req, res) {
           version: 1,
           serverTime: Date.now(),
           addresses: localAddresses(),
-          port: server.port || START_PORT,
+          port: runtime.httpPort,
+          httpsPort: runtime.httpsPort,
+          secure: !!runtime.httpsPort,
           stats: stats()
         });
       });
@@ -384,6 +438,24 @@ function handle(req, res) {
     if (pathname === '/api/images' && req.method === 'GET') return route(function () { return handleImagesGet(req, res, url.searchParams); });
     if (pathname === '/api/images' && req.method === 'POST') return route(function () { return handleImagesPost(req, res); });
     return sendJSON(res, 404, { ok: false, error: '没有这个接口：' + pathname });
+  }
+
+  if (pathname === '/ca.cer' || pathname === '/ca.crt') {
+    // 手机上打开这个地址就能装根证书。不带 Content-Disposition，
+    // 让 iOS 走"已下载描述文件"那条路，而不是存进文件 App。
+    if (!fs.existsSync(CA_FILE)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('还没有生成证书。在电脑上运行 tools\\make-cert.cmd');
+      return;
+    }
+    const buf = fs.readFileSync(CA_FILE);
+    res.writeHead(200, {
+      'Content-Type': 'application/x-x509-ca-cert',
+      'Content-Length': buf.length,
+      'Cache-Control': 'no-store'
+    });
+    res.end(buf);
+    return;
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -397,10 +469,50 @@ function handle(req, res) {
  * 启动
  * ------------------------------------------------------------------ */
 
-const server = http.createServer(handle);
+let tlsInfo = null;
+
+function banner() {
+  const lan = localAddresses();
+  const httpPort = runtime.httpPort;
+  const httpsPort = runtime.httpsPort;
+  const lines = ['', '  LifeBoard 已启动', '  ─────────────────────────────────────────────'];
+  lines.push('  这台电脑：      http://localhost:' + httpPort);
+
+  if (httpsPort) {
+    if (lan.length) {
+      lines.push('  iPhone 打开：   ' + lan.map(function (ip) { return 'https://' + ip + ':' + httpsPort + '/'; }).join('   '));
+      lines.push('                  （同一个 WiFi，装过一次证书之后就一直用这个地址）');
+    } else {
+      lines.push('  没有检测到局域网地址，手机暂时连不上。');
+    }
+    const missing = certMissingIps(tlsInfo, lan);
+    if (missing && missing.length) {
+      lines.push('');
+      lines.push('  ⚠ 证书里没有这些地址：' + missing.join('、'));
+      lines.push('    手机用它们访问会提示证书不对。重新运行 tools\\make-cert.cmd 即可。');
+    }
+  } else if (lan.length) {
+    lines.push('  iPhone 打开：   ' + lan.map(function (ip) { return 'http://' + ip + ':' + httpPort + '/'; }).join('   '));
+    lines.push('');
+    lines.push('  ⚠ 现在是 http，手机装不了离线缓存，出门会打不开。');
+    lines.push('    想要"在家同步 + 出门离线都能用同一个地址"，');
+    lines.push('    请先运行 tools\\make-cert.cmd 生成证书，再重启本服务。');
+  } else {
+    lines.push('  没有检测到局域网地址，手机暂时连不上。');
+  }
+
+  lines.push('  同步数据放在：  ' + path.relative(ROOT, DATA_DIR));
+  lines.push('  ─────────────────────────────────────────────');
+  lines.push('  同步只在局域网里跑，数据不经过任何服务器。');
+  lines.push('  按 Ctrl+C 停止服务');
+  lines.push('');
+  console.log(lines.join('\n'));
+}
 
 function listen(port, triesLeft) {
-  server.once('error', function (err) {
+  const httpServer = http.createServer(handle);
+
+  httpServer.once('error', function (err) {
     if (err.code === 'EADDRINUSE' && triesLeft > 0) {
       console.log('端口 ' + port + ' 已被占用，换 ' + (port + 1) + ' 试试…');
       listen(port + 1, triesLeft - 1);
@@ -409,25 +521,28 @@ function listen(port, triesLeft) {
       process.exit(1);
     }
   });
-  server.listen(port, '0.0.0.0', function () {
-    server.port = port;
+
+  httpServer.listen(port, '0.0.0.0', function () {
+    runtime.httpPort = port;
     loadState();
-    const lan = localAddresses();
-    const lines = ['', '  LifeBoard 已启动', '  ─────────────────────────────────────────────'];
-    lines.push('  这台电脑：      http://localhost:' + port);
-    if (lan.length) {
-      lines.push('  iPhone 打开：   ' + lan.map(function (ip) { return 'http://' + ip + ':' + port; }).join('   '));
-      lines.push('                  （手机要和电脑连同一个 WiFi）');
-    } else {
-      lines.push('  没有检测到局域网地址，手机暂时连不上。');
-    }
-    lines.push('  同步数据放在：  ' + path.relative(ROOT, DATA_DIR));
-    lines.push('  ─────────────────────────────────────────────');
-    lines.push('  同步只在局域网里跑，数据不经过任何服务器。');
-    lines.push('  按 Ctrl+C 停止服务');
-    lines.push('');
-    console.log(lines.join('\n'));
+
+    if (!tlsInfo) { banner(); return; }
+
+    const httpsServer = https.createServer(
+      { pfx: tlsInfo.pfx, passphrase: tlsInfo.passphrase },
+      handle
+    );
+    httpsServer.once('error', function (err) {
+      console.error('HTTPS 端口 ' + (port + 1) + ' 启动失败：' + err.message);
+      runtime.httpsPort = null;
+      banner();
+    });
+    httpsServer.listen(port + 1, '0.0.0.0', function () {
+      runtime.httpsPort = port + 1;
+      banner();
+    });
   });
 }
 
+tlsInfo = loadTLS();
 listen(START_PORT, MAX_TRIES);

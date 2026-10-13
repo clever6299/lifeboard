@@ -241,28 +241,57 @@
     ].join('，');
   }
 
+  function isLanHost() { return /^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname); }
+  function isLocalHost() { return location.hostname === 'localhost' || location.hostname === '127.0.0.1'; }
+  function isSecure() { return location.protocol === 'https:'; }
+
   function renderStatus() {
     if (!el.status) return;
 
     if (!state.health) {
-      el.status.innerHTML = '<p class="sync-bad"><strong>没找到同步服务。</strong></p>' +
-        '<p class="muted small">同步服务跑在电脑上。请用电脑的局域网地址打开本页，' +
-        '而不是 GitHub Pages 的 https 网址——浏览器不允许 https 页面访问局域网地址。</p>';
+      // 连不上：分情况说清楚，别让人猜
+      let why;
+      if (isSecure() && !isLanHost() && !isLocalHost()) {
+        why = '当前是从 GitHub Pages 那个 https 网址打开的。浏览器不允许 https 页面访问局域网的 http 服务，' +
+              '所以在那个网址上同步不了。';
+      } else if (isSecure()) {
+        why = '常见原因：手机不在同一个 WiFi，或者电脑上的服务没开。' +
+              '这不影响本机数据，回到家里再点一次同步就行。';
+      } else {
+        why = '请确认电脑上的服务正在运行，并且本页是从电脑的地址打开的。';
+      }
+      el.status.innerHTML = '<p class="sync-bad"><strong>现在连不上电脑上的同步服务。</strong></p>' +
+        '<p class="muted small">' + UI.esc(why) + '</p>';
       el.address.classList.add('hidden');
       el.doBtn.disabled = true;
       return;
     }
 
-    const lan = (state.health.addresses || []).map(function (ip) {
-      return 'http://' + ip + ':' + state.health.port + '/';
-    });
-    el.status.innerHTML = '<p class="sync-good"><strong>同步服务在线</strong></p>' +
-      '<p class="muted small">数据只在这台电脑和你的手机之间走，同一个 WiFi 内，不经过任何外部服务器。</p>';
+    const httpsPort = state.health.httpsPort;
+    const httpPort = state.health.port;
+    const lan = state.health.addresses || [];
 
-    if (lan.length && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-      el.address.classList.add('hidden');
-    } else if (lan.length) {
-      el.lanUrl.textContent = lan[0];
+    let mode;
+    if (isLocalHost()) {
+      mode = '这是电脑本身，直接同步就行。';
+    } else if (isSecure() && isLanHost()) {
+      mode = '这台设备用的是安全地址：在家能同步，出门也能靠离线缓存照常打开，数据只有一份。';
+    } else if (isSecure()) {
+      mode = '当前是 https，但同步服务在电脑上——请改用下面那个地址打开，之后就一直用它。';
+    } else {
+      mode = '当前是 http：能同步，但手机装不了离线缓存，出门会打不开。建议按下面换成 https 地址。';
+    }
+
+    el.status.innerHTML = '<p class="sync-good"><strong>同步服务在线</strong></p>' +
+      '<p class="muted small">' + UI.esc(mode) + '</p>';
+
+    // 需要给手机一个该用的地址时，把它显示出来
+    const phoneUrls = lan.map(function (ip) {
+      return httpsPort ? 'https://' + ip + ':' + httpsPort + '/' : 'http://' + ip + ':' + httpPort + '/';
+    });
+    const alreadyRight = isSecure() && isLanHost() && httpsPort && location.port === String(httpsPort);
+    if (phoneUrls.length && !alreadyRight) {
+      el.lanUrl.textContent = phoneUrls[0];
       el.address.classList.remove('hidden');
     } else {
       el.address.classList.add('hidden');
@@ -301,8 +330,8 @@
       state.health = null;
       renderStatus();
       if (el.hint) {
-        el.hint.textContent = location.protocol === 'https:'
-          ? '当前是从 https 地址打开的，浏览器会拦截对局域网 http 服务的请求。'
+        el.hint.textContent = (isSecure() && !isLanHost() && !isLocalHost())
+          ? '想同步的话，用电脑的局域网地址打开本页即可。'
           : '检测失败：' + err.message;
       }
     });

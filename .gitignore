@@ -21,6 +21,9 @@ lifeboard-backup-*.json
 # 局域网同步的数据仓库（里面是你的任务和图片）
 sync-data/
 
+# 本机自签证书和私钥（每台电脑自己生成，绝不能提交）
+certs/
+
 # Python（图标生成脚本的缓存）
 __pycache__/
 *.pyc
