@@ -95,10 +95,15 @@
     const todayKey = UI.todayKey();
     const map = byDateMap();
 
+    // 只画需要的那几周：有些月份 5 行就够，不必留一整行空白
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const weeks = Math.ceil((offset + daysInMonth) / 7);
+    const cellCount = weeks * 7;
+
     let html = '';
     let monthTotal = 0, monthDone = 0;
 
-    for (let i = 0; i < 42; i++) {
+    for (let i = 0; i < cellCount; i++) {
       const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
       const key = UI.dayKey(d);
       const inMonth = d.getMonth() === month;
@@ -108,6 +113,7 @@
 
       const classes = ['cell'];
       if (!inMonth) classes.push('out');
+      if (d.getDay() === 0 || d.getDay() === 6) classes.push('wkend');
       if (key === todayKey) classes.push('today');
       if (key === state.selected) classes.push('sel');
       if (list.length && done === list.length) classes.push('done-all');
@@ -163,13 +169,15 @@
       el.daySub.textContent = total ? '共 ' + total + ' 项，已完成 ' + done + ' 项' : '还没有任务';
     }
 
-    el.addTitle.placeholder = isUndoneMode
-      ? '添加到 ' + UI.friendly(state.selected, false) + ' …'
-      : '添加任务…';
+    el.addTitle.placeholder = state.selected === todayKey
+      ? '今天要做什么？'
+      : '添加到 ' + UI.friendly(state.selected, false) + '…';
 
     if (!total) {
       el.list.innerHTML = '';
-      el.empty.textContent = isUndoneMode ? '太棒了，没有未完成的任务。' : '这一天还没有任务。';
+      el.empty.textContent = isUndoneMode
+        ? '没有未完成的事，今天可以收工了。'
+        : '这一天还是空的。在上面写一条。';
       el.empty.classList.remove('hidden');
     } else {
       el.empty.classList.add('hidden');
@@ -232,9 +240,9 @@
         meta +
       '</div>' +
       '<div class="t-actions">' +
-        '<button class="mini" data-act="tpl" title="存为常用任务" type="button">☆</button>' +
-        '<button class="mini" data-act="edit" title="编辑" type="button">✎</button>' +
-        '<button class="mini" data-act="delete" title="删除" type="button">🗑</button>' +
+        '<button class="mini" data-act="tpl" title="保存为常用任务" type="button">常用</button>' +
+        '<button class="mini" data-act="edit" title="编辑这条任务" type="button">编辑</button>' +
+        '<button class="mini" data-act="delete" title="删除这条任务" type="button">删除</button>' +
       '</div>' +
     '</li>';
   }
@@ -251,7 +259,7 @@
 
     if (!list.length) {
       el.tplList.innerHTML = '<p class="muted small tpl-empty">还没有常用任务。' +
-        '在输入框里写好内容后点「＋ 存为常用」，或者点任务右边的 ☆ 把已有任务存下来。</p>';
+        '在输入框里写好内容后点「保存为常用」，或者点任务右边的「常用」把整条任务存下来。</p>';
       return;
     }
 
@@ -276,7 +284,7 @@
 
   function addTemplate(title, note, priority) {
     const clean = String(title || '').trim().slice(0, 200);
-    if (!clean) { UI.toast('先写上任务内容，再存为常用', 'err'); return Promise.resolve(false); }
+    if (!clean) { UI.toast('先在输入框里写上任务内容', 'err'); return Promise.resolve(false); }
     if (templateExists(clean)) { UI.toast('「' + clean + '」已经在常用任务里了', 'err'); return Promise.resolve(false); }
 
     const tpl = {
@@ -293,7 +301,7 @@
       state.templates = rows || [];
       state.tplOpen = true;
       renderTemplates();
-      UI.toast('已存为常用：' + clean, 'ok');
+      UI.toast('已保存为常用：' + clean, 'ok');
       return true;
     });
   }

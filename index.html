@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>LifeBoard · 每日任务日历 &amp; 夯拉榜</title>
+<title>LifeBoard：日历与夯拉榜</title>
 <meta name="description" content="本地优先的每日任务日历与图片分级榜单" />
 <meta name="theme-color" content="#0e1116" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -31,10 +31,10 @@
   </div>
   <nav class="tabs" id="tabs">
     <button class="tab active" data-view="calendar">日历任务</button>
-    <button class="tab" data-view="tier">夯 → 拉 榜</button>
+    <button class="tab" data-view="tier">夯拉榜</button>
   </nav>
   <div class="topbar-right">
-    <button class="icon-btn" id="btnSettings" title="设置与备份" aria-label="设置与备份">⚙</button>
+    <button class="linkbtn" id="btnSettings" title="设置与备份">设置</button>
   </div>
 </header>
 
@@ -85,7 +85,7 @@
         </div>
 
         <form id="addForm" class="add-form" autocomplete="off">
-          <input type="text" id="addTitle" placeholder="添加任务…" maxlength="200" />
+          <input type="text" id="addTitle" placeholder="今天要做什么？" maxlength="200" />
           <select id="addPriority" title="优先级">
             <option value="0">普通</option>
             <option value="1">重要</option>
@@ -96,9 +96,9 @@
 
         <div class="tpl-bar">
           <button class="btn ghost small" id="btnTplToggle" type="button" aria-expanded="false">
-            <span class="star">★</span> 常用任务 <span class="badge" id="tplCount">0</span>
+            常用任务 <span class="badge" id="tplCount">0</span>
           </button>
-          <button class="btn ghost small" id="btnSaveTpl" type="button" title="把输入框里的内容存为常用任务">＋ 存为常用</button>
+          <button class="btn ghost small" id="btnSaveTpl" type="button" title="把输入框里的内容保存成常用任务">保存为常用</button>
         </div>
         <div class="tpl-list hidden" id="tplList"></div>
 
@@ -116,15 +116,16 @@
 
     <div class="panel board-bar">
       <div class="board-tabs" id="boardTabs"></div>
-      <div class="spacer"></div>
-      <button class="btn small" id="btnAddBoard" title="新建一个榜单分类">＋ 新建榜单</button>
-      <button class="btn small ghost" id="btnRenameBoard" title="重命名当前榜单">改名</button>
-      <button class="btn small danger" id="btnDeleteBoard" title="删除当前榜单">删除榜单</button>
+      <div class="board-actions">
+        <button class="btn small" id="btnAddBoard" title="新建一个榜单分类">新建榜单</button>
+        <button class="btn small ghost" id="btnRenameBoard" title="重命名当前榜单">改名</button>
+        <button class="btn small danger" id="btnDeleteBoard" title="删除当前榜单">删除榜单</button>
+      </div>
     </div>
 
     <div class="panel tier-toolbar">
-      <button class="btn primary" id="btnUpload">＋ 上传图片</button>
-      <button class="btn" id="btnAddTier">＋ 新增档位</button>
+      <button class="btn primary" id="btnUpload">上传图片</button>
+      <button class="btn" id="btnAddTier">新增档位</button>
       <div class="seg" role="group" aria-label="视图切换">
         <button class="seg-btn active" data-tierview="board">榜单</button>
         <button class="seg-btn" data-tierview="table">评分表</button>
@@ -138,9 +139,7 @@
     <div id="tierTable" class="panel tier-table-wrap hidden"></div>
 
     <p class="hint muted small">
-      电脑：把图片直接拖进页面，或复制图片后按 <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>V</kbd> 粘贴；卡片可以拖到别的档位。
-      手机：点「上传图片」，点任意卡片即可改星级、写评语、换档位。新上传的图片会先落到页面最下面的「未分档」。
-      所有图片只存在你自己的设备上。
+      电脑可以直接把图片拖进来，卡片也能拖到别的档位；手机上点卡片就能打分、写评语。
     </p>
   </section>
 

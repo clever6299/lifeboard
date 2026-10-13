@@ -153,7 +153,8 @@
     const media = url
       ? '<img src="' + url + '" alt="" loading="lazy" draggable="false" />'
       : '<div class="c-media-missing">图片缺失</div>';
-    return '<div class="card" draggable="true" data-item="' + item.id + '" title="' + UI.esc(item.name) + '">' +
+    const tip = item.comment ? item.name + '：' + item.comment : item.name;
+    return '<div class="card" draggable="true" data-item="' + item.id + '" title="' + UI.esc(tip) + '">' +
       media +
       '<div class="c-body">' +
         '<div class="c-name">' + UI.esc(item.name || '未命名') + '</div>' +
@@ -244,12 +245,12 @@
     if (!el.stats) return;
     const list = state.items.filter(function (i) { return i.boardId === state.currentBoardId; });
     const total = list.length;
-    if (!total) { el.stats.textContent = '这个榜单还没有图片'; return; }
+    if (!total) { el.stats.textContent = '还没有图片'; return; }
     const rated = list.filter(function (i) { return i.stars > 0; });
     const avg = rated.length
       ? (rated.reduce(function (s, i) { return s + i.stars; }, 0) / rated.length).toFixed(1)
       : '—';
-    el.stats.textContent = '共 ' + total + ' 张 · 已评分 ' + rated.length + ' 张 · 平均 ' + avg + ' 星';
+    el.stats.textContent = total + ' 张图片，已评分 ' + rated.length + ' 张，平均 ' + avg + ' 星';
   }
 
   /* ---------------- 图片详情弹窗 ---------------- */

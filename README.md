@@ -92,14 +92,15 @@ PORT=8080 node server.js
 
 ```
 lifeboard/
-├── index.html                 页面骨架（两个视图 + 两个弹窗）
-├── styles.css                 全部样式（深色主题，移动端自适应）
+├── index.html                 页面骨架（两个视图 + 三个弹窗）
+├── styles.css                 全部样式（台历风格，自动亮/暗色）
+├── DESIGN.md                  设计说明：为什么长这样，改之前先看
 ├── manifest.webmanifest       PWA 清单，用于"添加到主屏幕"
 ├── sw.js                      Service Worker，离线缓存
 ├── server.js                  零依赖本地静态服务器
 ├── start.cmd                  Windows 双击启动
 ├── js/
-│   ├── ui.js                  通用工具（转义、日期、toast、弹窗、下载）
+│   ├── ui.js                  通用工具（确认框、输入框、转义、日期、toast）
 │   ├── store.js               IndexedDB 封装 + 图片压缩 + 导入导出
 │   ├── calendar.js            日历任务页
 │   ├── tier.js                夯拉榜页
@@ -110,6 +111,10 @@ lifeboard/
 
 技术栈就是原生 HTML + CSS + JavaScript，没有构建步骤、没有 `node_modules`、不请求任何 CDN。
 改完文件刷新页面即可生效。
+
+界面是照着「台历 + 排名条」这个方向做的：日历是真正的印刷网格，今天是一整格实心红块，
+榜单是一条压一条的实色色带。**自动跟随系统的亮色 / 暗色模式**。
+设计令牌和取舍理由都写在 [DESIGN.md](DESIGN.md) 里，改样式之前建议先看一眼。
 
 数据模型（都放在 IndexedDB 的 `lifeboard` 库里）：
 

@@ -67,9 +67,9 @@
           '图片卡片 ' + (counts.items || 0) + ' 张',
           '图片文件 ' + (counts.images || 0) + ' 个'
         ];
-        let text = parts.join(' · ');
+        let text = parts.join('，');
         if (est && est.usage != null) {
-          text += '；本机已用 ' + UI.size(est.usage);
+          text += '。本机已用 ' + UI.size(est.usage);
           if (est.quota) text += '，浏览器可用上限约 ' + UI.size(est.quota);
         }
         box.textContent = text;

@@ -6,7 +6,7 @@
  *
  * 数据全部在 IndexedDB 里，这里只缓存页面本身。
  */
-const CACHE = 'lifeboard-v2';
+const CACHE = 'lifeboard-v3';
 const SHELL = [
   './',
   './index.html',
