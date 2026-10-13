@@ -162,6 +162,20 @@ kbd { color: var(--ink-2); }
 .tab.active { color: var(--ink); font-weight: 700; border-bottom-color: var(--ink); }
 
 .topbar-right { margin-left: auto; }
+.tab, .linkbtn { white-space: nowrap; }
+
+/* 手机上顶栏元素多，收紧间距，别让"日历任务"折成两行 */
+@media (max-width: 620px) {
+  .topbar { gap: 10px; padding-left: 14px; padding-right: 14px; }
+  .brand { gap: 7px; }
+  .brand .brand-text { font-size: 15px; }
+  .tab { font-size: 14px; margin-right: 10px; }
+  .topbar-right { display: flex; gap: 0; }
+  .linkbtn { font-size: 13.5px; padding: 6px 6px; }
+}
+@media (max-width: 380px) {
+  .brand .brand-text { display: none; }
+}
 
 /* ---------- 控件 ---------- */
 .btn {
