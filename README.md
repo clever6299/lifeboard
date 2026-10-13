@@ -13,11 +13,13 @@
 
 ### 方式 A：GitHub Pages（推荐，手机和电脑都能用，出门也能开）
 
-部署完成后网址形如：
+**已经部署好了，直接打开：**
 
 ```
-https://<你的用户名>.github.io/lifeboard/
+https://clever6299.github.io/lifeboard/
 ```
+
+电脑和 iPhone 都用这个网址，数据各自存在本机，需要时用「导出 / 导入」互传（见第二节）。
 
 iPhone 上用 Safari 打开后，点底部「分享」→「添加到主屏幕」，就变成一个全屏 App 图标，断网也能打开。
 
@@ -111,17 +113,29 @@ lifeboard/
 
 ## 六、部署到 GitHub Pages
 
+仓库已经在 <https://github.com/clever6299/lifeboard>，Pages 已开启，以后改完代码这样更新：
+
+```bash
+git add .
+git commit -m "描述这次改了什么"
+git push
+```
+
+推送后 GitHub 会在一两分钟内自动重新发布，刷新网址即可看到新版。
+（如果手机上看不到新版，见第七节的 Service Worker 缓存那一条。）
+
+如果要在别的账号 / 别的仓库重新部署一次：
+
 ```bash
 git init
 git add .
 git commit -m "feat: LifeBoard 每日任务日历 + 夯拉榜"
 git branch -M main
-git remote add origin https://github.com/<你的用户名>/lifeboard.git
+git remote add origin https://github.com/<用户名>/<仓库名>.git
 git push -u origin main
 ```
 
 然后在 GitHub 仓库页面：**Settings → Pages → Source 选 `Deploy from a branch` → Branch 选 `main` / 目录选 `/ (root)` → Save**。
-等一两分钟，`https://<你的用户名>.github.io/lifeboard/` 就能打开了。
 
 ---
 
