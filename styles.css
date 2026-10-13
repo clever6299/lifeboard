@@ -318,13 +318,35 @@ main { padding: 20px 20px calc(32px + var(--safe-bottom)); max-width: 1280px; ma
   font-size: 15px; font-weight: 500;
   font-variant-numeric: tabular-nums; line-height: 1.15;
 }
-.cell.wkend .num { color: var(--red); }
+/* 放假的日子（周末 + 法定节假日）印红；调休上班的日子印回墨色 */
+.cell.rest .num { color: var(--red); }
+.cell.makeup .num { color: var(--ink); }
 .cell.out .num { color: var(--ink-4); }
 .cell.out { background: var(--sheet-sunk); }
+
+/* 节日名，只标在连休第一天，跟台历一样 */
+.cell .holi-name {
+  font-size: 10px; line-height: 1.25; margin-top: 1px;
+  color: var(--red); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cell.out .holi-name { color: var(--ink-4); }
+.cell.today .holi-name { color: rgba(255, 255, 255, .92); }
+
+/* 调休上班：台历上就是盖一个「班」字 */
+.cell .work-stamp {
+  position: absolute; top: 6px; right: 6px;
+  width: 15px; height: 15px; border-radius: 2px;
+  background: var(--ink); color: var(--paper);
+  font-size: 9.5px; line-height: 15px; text-align: center; font-weight: 700;
+}
+.cell.today .work-stamp { background: rgba(255, 255, 255, .94); color: var(--red-fill); }
+.cell.makeup:hover { background: var(--hover); }
 
 /* 已清空的一天：整格压暗，一眼扫得出来 */
 .cell.done-all { background: var(--sheet-sunk); }
 .cell.done-all .num { color: var(--ink-3); }
+/* 放假的红色优先：节假日做完了任务，也不该看起来像工作日 */
+.cell.rest.done-all .num { color: var(--red); }
 
 /* 唯一的“大胆”之处：今天是一整格实心红块，像台历上撕开的那一格 */
 .cell.today { background: var(--red-fill); }
@@ -370,6 +392,12 @@ main { padding: 20px 20px calc(32px + var(--safe-bottom)); max-width: 1280px; ma
 .legend .dot.p0 { background: var(--p0); }
 .legend .dot.p1 { background: var(--p1); }
 .legend .dot.p2 { background: var(--p2); }
+.legend #legendMakeup { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; }
+.legend .stamp-mini {
+  width: 13px; height: 13px; border-radius: 2px; background: var(--ink); color: var(--paper);
+  font-size: 9px; line-height: 13px; text-align: center; font-weight: 700; font-style: normal;
+  display: inline-block;
+}
 
 /* ---------- 某天的事 ---------- */
 .day-panel { position: sticky; top: 66px; padding: 0; }
@@ -520,6 +548,11 @@ main { padding: 20px 20px calc(32px + var(--safe-bottom)); max-width: 1280px; ma
   display: block; text-align: center; color: var(--ink-2); font-size: 13px; padding: 8px 0;
 }
 
+/* 还没有榜单时的引导。用卡片自己的边框当外框，这里就不再画一遍 */
+.tier-blank { padding: 48px 24px; text-align: center; }
+.tier-blank-title { font-size: 17px; font-weight: 700; margin: 0 0 8px; }
+.tier-blank p { max-width: 44ch; margin: 0 auto 16px; }
+
 /* 色带：一条压一条，没有间隙、没有圆角——这才是 tier list 的样子 */
 .tier-row {
   display: grid; grid-template-columns: 96px minmax(0, 1fr);
@@ -617,6 +650,33 @@ table.tier-table .tt-tier {
   display: inline-block; padding: 1px 8px; font-size: 12px; font-weight: 700; color: var(--ink);
 }
 table.tier-table .tt-comment { color: var(--ink-2); max-width: 300px; }
+
+/* ---------- 局域网同步 ---------- */
+.sync-status { margin-bottom: 4px; }
+.sync-status p { margin: 0 0 6px; line-height: 1.6; }
+.sync-status .sync-good::before,
+.sync-status .sync-bad::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 7px; vertical-align: 1px;
+}
+.sync-status .sync-good::before { background: var(--ink); }
+.sync-status .sync-bad { color: var(--ink); }
+.sync-status .sync-bad::before { background: var(--red); }
+.sync-status .sync-bad strong { color: var(--red); }
+
+.sync-address {
+  margin: 14px 0; padding: 12px;
+  background: var(--sheet-sunk); border: 1px dashed var(--rule-strong);
+}
+.sync-address p { margin: 0 0 8px; }
+.sync-address code {
+  font-size: 13.5px; font-weight: 600; color: var(--ink);
+  background: none; border: 0; padding: 0;
+}
+
+.sync-stats { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--rule); }
+.sync-stats p { margin: 0 0 4px; }
+#syncHint { min-height: 18px; }
 
 /* ---------- 弹窗 ---------- */
 .modal {

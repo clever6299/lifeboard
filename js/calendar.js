@@ -15,6 +15,14 @@
 
   const el = {};
 
+  /** 法定节假日与调休安排，见 js/holidays.js */
+  const HOLIDAYS = global.LB_HOLIDAYS || {};
+  const HOLIDAY_YEARS = (function () {
+    const set = new Set();
+    Object.keys(HOLIDAYS).forEach(function (k) { set.add(k.slice(0, 4)); });
+    return set;
+  })();
+
   function cacheEls() {
     el.grid = UI.$('#calGrid');
     el.title = UI.$('#calTitle');
@@ -102,6 +110,7 @@
 
     let html = '';
     let monthTotal = 0, monthDone = 0;
+    let hasMakeup = false;
 
     for (let i = 0; i < cellCount; i++) {
       const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
@@ -111,9 +120,17 @@
       const done = list.filter(function (t) { return t.done; }).length;
       if (inMonth) { monthTotal += list.length; monthDone += done; }
 
+      // 台历的规则：法定节假日和周末都放假；调休上班的那天即使是周末也要上班
+      const holiday = HOLIDAYS[key] || null;
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      const isRest = holiday ? !!holiday.off : isWeekend;
+      const isMakeup = isWeekend && !!holiday && !holiday.off;
+      if (inMonth && isMakeup) hasMakeup = true;
+
       const classes = ['cell'];
       if (!inMonth) classes.push('out');
-      if (d.getDay() === 0 || d.getDay() === 6) classes.push('wkend');
+      if (isRest) classes.push('rest');
+      if (isMakeup) classes.push('makeup');
       if (key === todayKey) classes.push('today');
       if (key === state.selected) classes.push('sel');
       if (list.length && done === list.length) classes.push('done-all');
@@ -127,17 +144,32 @@
           '<span class="' + (done === list.length ? '' : 'over') + '">' + done + '/' + list.length + '</span></span>'
         : '';
 
+      // 节日名只在连休第一天标出来，跟台历一样
+      const holiName = holiday && holiday.off && holiday.first && holiday.name
+        ? '<span class="holi-name">' + UI.esc(holiday.name) + '</span>'
+        : '';
+      const stamp = isMakeup ? '<span class="work-stamp" title="调休上班">班</span>' : '';
+
       html += '<button class="' + classes.join(' ') + '" data-date="' + key + '" role="gridcell" ' +
-        'aria-label="' + UI.esc(UI.friendly(key)) + '">' +
+        'aria-label="' + UI.esc(UI.friendly(key) + (holiday ? '，' + (holiday.off ? '放假' : '调休上班') : '')) + '">' +
         '<span class="num">' + d.getDate() + '</span>' +
+        holiName + stamp +
         '<span class="dots">' + dots + '</span>' + count +
         '</button>';
     }
 
     el.grid.innerHTML = html;
-    el.stats.textContent = monthTotal
+
+    const legendMakeup = UI.$('#legendMakeup');
+    if (legendMakeup) legendMakeup.classList.toggle('hidden', !hasMakeup);
+
+    let stats = monthTotal
       ? '本月 ' + monthTotal + ' 项任务，已完成 ' + monthDone + ' 项（' + Math.round(monthDone / monthTotal * 100) + '%）'
       : '本月还没有任务，点日期开始添加。';
+    if (!HOLIDAY_YEARS.has(String(year))) {
+      stats += '（这一年的法定节假日数据还没有，周末照常标记）';
+    }
+    el.stats.textContent = stats;
   }
 
   /* ---------------- 渲染：某天任务 ---------------- */
@@ -161,12 +193,20 @@
     const todayKey = UI.todayKey();
     const total = list.length;
     const done = list.filter(function (t) { return t.done; }).length;
+    const holiday = HOLIDAYS[state.selected] || null;
+    let note = '';
+    if (holiday) {
+      note = holiday.off
+        ? (holiday.name ? holiday.name + '，放假' : '放假')
+        : (holiday.name ? holiday.name + '，调休上班' : '调休上班');
+    }
 
     if (isUndoneMode) {
       const overdue = list.filter(function (t) { return t.date < todayKey; }).length;
       el.daySub.textContent = total + ' 项未完成' + (overdue ? '，其中 ' + overdue + ' 项已逾期' : '');
     } else {
-      el.daySub.textContent = total ? '共 ' + total + ' 项，已完成 ' + done + ' 项' : '还没有任务';
+      el.daySub.textContent = (note ? note + '。' : '') +
+        (total ? '共 ' + total + ' 项，已完成 ' + done + ' 项' : '还没有任务');
     }
 
     el.addTitle.placeholder = state.selected === todayKey

@@ -18,6 +18,9 @@ desktop.ini
 lifeboard-backup-*.json
 *.local.json
 
+# 局域网同步的数据仓库（里面是你的任务和图片）
+sync-data/
+
 # Python（图标生成脚本的缓存）
 __pycache__/
 *.pyc

@@ -65,7 +65,8 @@
           '榜单 ' + (counts.boards || 0) + ' 个',
           '档位 ' + (counts.tiers || 0) + ' 个',
           '图片卡片 ' + (counts.items || 0) + ' 张',
-          '图片文件 ' + (counts.images || 0) + ' 个'
+          '图片文件 ' + (counts.images || 0) + ' 个',
+          '待同步的删除 ' + (counts.tombstones || 0) + ' 条'
         ];
         let text = parts.join('，');
         if (est && est.usage != null) {
@@ -204,14 +205,15 @@
                 '<li>榜单 ' + (c.boards || 0) + ' 个、档位 ' + (c.tiers || 0) + ' 个</li>' +
                 '<li>图片卡片 ' + (c.items || 0) + ' 张、图片文件 ' + (c.images || 0) + ' 个</li>' +
                 '</ul>' +
-                '<p class="muted small">删除后无法恢复，建议先导出一份备份。确定继续吗？</p>',
+                '<p class="muted small">删除后无法恢复，建议先导出一份备份。' +
+                '下次点「同步」时，这些删除也会同步到电脑上。</p>',
           okLabel: '全部删除'
         });
       }).then(function (ok) {
         if (!ok) return;
         UI.busy(true, '正在清空…');
         LB.image.clearCache();
-        LB.store.clearAll().then(function () {
+        LB.store.wipeAll().then(function () {
           return LB.calendar.refresh().then(function () { return LB.tier.reload(); });
         }).then(function () {
           UI.busy(false);
@@ -270,6 +272,7 @@
       UI.toast('榜单加载失败：' + err.message, 'err');
       console.error(err);
     });
+    LB.sync.init();
 
     requestPersistence();
     registerServiceWorker();

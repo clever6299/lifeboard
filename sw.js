@@ -6,7 +6,7 @@
  *
  * 数据全部在 IndexedDB 里，这里只缓存页面本身。
  */
-const CACHE = 'lifeboard-v3';
+const CACHE = 'lifeboard-v4';
 const SHELL = [
   './',
   './index.html',
@@ -14,8 +14,10 @@ const SHELL = [
   './manifest.webmanifest',
   './js/ui.js',
   './js/store.js',
+  './js/holidays.js',
   './js/calendar.js',
   './js/tier.js',
+  './js/sync.js',
   './js/app.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
