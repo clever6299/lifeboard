@@ -1,0 +1,23 @@
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+.cache/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 本地备份（导出的 json 不要提交，里面可能有私人图片）
+lifeboard-backup-*.json
+*.local.json
+
+# Python（图标生成脚本的缓存）
+__pycache__/
+*.pyc

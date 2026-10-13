@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>LifeBoard · 每日任务日历 &amp; 夯拉榜</title>
+<meta name="description" content="本地优先的每日任务日历与图片分级榜单" />
+<meta name="theme-color" content="#0e1116" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="LifeBoard" />
+<link rel="manifest" href="./manifest.webmanifest" />
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+<link rel="icon" type="image/png" href="./icons/icon-192.png" />
+<link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+<div id="fileWarn" class="banner hidden">
+  <strong>当前是直接打开文件的方式。</strong>
+  浏览器会禁止网页在这一模式下保存数据。请改用下面任一方式：
+  1) 双击项目里的 <code>start.cmd</code> 启动本地服务；
+  2) 直接访问 GitHub Pages 网址。
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"></span>
+    <span class="brand-text">LifeBoard</span>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="calendar">日历任务</button>
+    <button class="tab" data-view="tier">夯 → 拉 榜</button>
+  </nav>
+  <div class="topbar-right">
+    <button class="icon-btn" id="btnSettings" title="设置与备份" aria-label="设置与备份">⚙</button>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ 日历任务 ============ -->
+  <section id="view-calendar" class="view active">
+    <div class="cal-wrap">
+
+      <div class="panel cal-main">
+        <div class="cal-head">
+          <button class="icon-btn" id="calPrev" aria-label="上个月">‹</button>
+          <h1 class="cal-title" id="calTitle">—</h1>
+          <button class="icon-btn" id="calNext" aria-label="下个月">›</button>
+          <button class="btn ghost small" id="calToday">今天</button>
+          <div class="spacer"></div>
+          <label class="jump">
+            <span class="muted small">跳转</span>
+            <input type="date" id="calJump" aria-label="跳转到日期" />
+          </label>
+        </div>
+
+        <div class="weekdays" aria-hidden="true">
+          <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span class="wk">六</span><span class="wk">日</span>
+        </div>
+        <div class="grid" id="calGrid" role="grid" aria-label="月历"></div>
+
+        <div class="cal-foot">
+          <span class="muted small" id="calStats">—</span>
+          <span class="legend">
+            <i class="dot p0"></i>普通
+            <i class="dot p1"></i>重要
+            <i class="dot p2"></i>紧急
+          </span>
+        </div>
+      </div>
+
+      <aside class="panel day-panel">
+        <div class="day-head">
+          <div>
+            <h2 id="dayTitle">—</h2>
+            <div class="muted small" id="daySub">—</div>
+          </div>
+          <label class="chip">
+            <input type="checkbox" id="showUndone" />
+            <span>只看未完成</span>
+          </label>
+        </div>
+
+        <form id="addForm" class="add-form" autocomplete="off">
+          <input type="text" id="addTitle" placeholder="添加任务…" maxlength="200" />
+          <select id="addPriority" title="优先级">
+            <option value="0">普通</option>
+            <option value="1">重要</option>
+            <option value="2">紧急</option>
+          </select>
+          <button class="btn primary" type="submit">添加</button>
+        </form>
+
+        <ul class="task-list" id="taskList"></ul>
+        <p class="empty muted hidden" id="taskEmpty">这一天还没有任务。</p>
+
+        <p class="hint muted small" id="undoneHint"></p>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- ============ 夯 → 拉 榜 ============ -->
+  <section id="view-tier" class="view">
+    <div class="panel tier-toolbar">
+      <button class="btn primary" id="btnUpload">＋ 上传图片</button>
+      <button class="btn" id="btnAddTier">＋ 新增档位</button>
+      <div class="seg" role="group" aria-label="视图切换">
+        <button class="seg-btn active" data-tierview="board">榜单</button>
+        <button class="seg-btn" data-tierview="table">评分表</button>
+      </div>
+      <div class="spacer"></div>
+      <span class="muted small" id="tierStats">—</span>
+      <input type="file" id="fileInput" accept="image/*" multiple hidden />
+    </div>
+
+    <div id="tierBoard" class="tier-board"></div>
+    <div id="tierTable" class="panel tier-table-wrap hidden"></div>
+
+    <p class="hint muted small">
+      电脑：把图片直接拖进页面，或复制图片后按 <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>V</kbd> 粘贴；卡片可以拖到别的档位。
+      手机：点「上传图片」，点任意卡片即可改星级、写评语、换档位。所有图片只存在你自己的设备上。
+    </p>
+  </section>
+
+</main>
+
+<!-- ============ 图片详情 ============ -->
+<div class="modal hidden" id="itemModal" role="dialog" aria-modal="true" aria-label="图片详情">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>图片详情</h2>
+      <button class="icon-btn" data-close="itemModal" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body" id="itemModalBody"></div>
+  </div>
+</div>
+
+<!-- ============ 设置 ============ -->
+<div class="modal hidden" id="settingsModal" role="dialog" aria-modal="true" aria-label="设置与备份">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>设置与备份</h2>
+      <button class="icon-btn" data-close="settingsModal" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <section class="set-block">
+        <h3>备份与恢复</h3>
+        <p class="muted small">
+          导出的 JSON 文件包含全部任务、档位、图片、星级和评语，可以拿到另一台设备上导入，
+          这就是电脑和 iPhone 之间同步数据的方式。
+        </p>
+        <label class="chip"><input type="checkbox" id="exportWithImages" checked /> <span>导出时包含图片（文件较大）</span></label>
+        <div class="row">
+          <button class="btn primary" id="btnExport">导出备份 (.json)</button>
+          <label class="btn" for="importInput">导入备份…</label>
+          <input type="file" id="importInput" accept="application/json,.json" hidden />
+        </div>
+        <div class="import-options hidden" id="importOptions">
+          <p class="small" id="importPreview">—</p>
+          <label class="radio"><input type="radio" name="importMode" value="merge" checked /> <span>合并：保留现有数据，相同 ID 的条目被覆盖</span></label>
+          <label class="radio"><input type="radio" name="importMode" value="replace" /> <span>覆盖：先清空本机全部数据，再导入</span></label>
+          <div class="row">
+            <button class="btn primary" id="btnDoImport">确认导入</button>
+            <button class="btn ghost" id="btnCancelImport">取消</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="set-block">
+        <h3>存储占用</h3>
+        <p id="storageInfo" class="muted small">统计中…</p>
+        <div class="row">
+          <button class="btn ghost" id="btnRefreshStorage">刷新统计</button>
+          <button class="btn danger" id="btnWipe">清空全部数据</button>
+        </div>
+      </section>
+
+      <section class="set-block">
+        <h3>装到 iPhone 主屏幕</h3>
+        <p class="muted small">
+          Safari 打开本页 → 底部「分享」按钮 → 「添加到主屏幕」。
+          之后从主屏幕图标进入就是全屏 App 的样子，断网也能打开。
+        </p>
+      </section>
+
+      <section class="set-block">
+        <h3>快捷键</h3>
+        <p class="muted small">
+          <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>V</kbd> 粘贴图片到榜单 ·
+          <kbd>Esc</kbd> 关闭弹窗
+        </p>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+<div class="busy hidden" id="busy"><div class="busy-box"><div class="spinner"></div><span id="busyText">处理中…</span></div></div>
+
+<script src="./js/ui.js"></script>
+<script src="./js/store.js"></script>
+<script src="./js/calendar.js"></script>
+<script src="./js/tier.js"></script>
+<script src="./js/app.js"></script>
+</body>
+</html>
