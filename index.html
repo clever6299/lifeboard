@@ -94,6 +94,14 @@
           <button class="btn primary" type="submit">添加</button>
         </form>
 
+        <div class="tpl-bar">
+          <button class="btn ghost small" id="btnTplToggle" type="button" aria-expanded="false">
+            <span class="star">★</span> 常用任务 <span class="badge" id="tplCount">0</span>
+          </button>
+          <button class="btn ghost small" id="btnSaveTpl" type="button" title="把输入框里的内容存为常用任务">＋ 存为常用</button>
+        </div>
+        <div class="tpl-list hidden" id="tplList"></div>
+
         <ul class="task-list" id="taskList"></ul>
         <p class="empty muted hidden" id="taskEmpty">这一天还没有任务。</p>
 
@@ -105,6 +113,15 @@
 
   <!-- ============ 夯 → 拉 榜 ============ -->
   <section id="view-tier" class="view">
+
+    <div class="panel board-bar">
+      <div class="board-tabs" id="boardTabs"></div>
+      <div class="spacer"></div>
+      <button class="btn small" id="btnAddBoard" title="新建一个榜单分类">＋ 新建榜单</button>
+      <button class="btn small ghost" id="btnRenameBoard" title="重命名当前榜单">改名</button>
+      <button class="btn small danger" id="btnDeleteBoard" title="删除当前榜单">删除榜单</button>
+    </div>
+
     <div class="panel tier-toolbar">
       <button class="btn primary" id="btnUpload">＋ 上传图片</button>
       <button class="btn" id="btnAddTier">＋ 新增档位</button>
@@ -122,7 +139,8 @@
 
     <p class="hint muted small">
       电脑：把图片直接拖进页面，或复制图片后按 <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>V</kbd> 粘贴；卡片可以拖到别的档位。
-      手机：点「上传图片」，点任意卡片即可改星级、写评语、换档位。所有图片只存在你自己的设备上。
+      手机：点「上传图片」，点任意卡片即可改星级、写评语、换档位。新上传的图片会先落到页面最下面的「未分档」。
+      所有图片只存在你自己的设备上。
     </p>
   </section>
 
@@ -139,6 +157,43 @@
   </div>
 </div>
 
+<!-- ============ 通用确认（由 UI.confirm 驱动，自己处理关闭） ============ -->
+<div class="modal hidden" id="confirmModal" data-static role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="modal-card small-card">
+    <div class="modal-head">
+      <h2 id="confirmTitle">确认操作</h2>
+      <button class="icon-btn" data-close="confirmModal" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="confirmMessage" class="confirm-message"></div>
+      <div class="row right">
+        <button class="btn ghost" id="confirmCancel" type="button">取消</button>
+        <button class="btn danger" id="confirmOk" type="button">删除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 通用输入（由 UI.prompt 驱动） ============ -->
+<div class="modal hidden" id="promptModal" data-static role="dialog" aria-modal="true" aria-labelledby="promptTitle">
+  <div class="modal-card small-card">
+    <div class="modal-head">
+      <h2 id="promptTitle">输入</h2>
+      <button class="icon-btn" data-close="promptModal" aria-label="关闭">✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field-label" id="promptLabel" for="promptInput">名称</label>
+      <input type="text" id="promptInput" maxlength="60" autocomplete="off" />
+      <div class="swatches hidden" id="promptSwatches"></div>
+      <p class="muted small" id="promptHint"></p>
+      <div class="row right">
+        <button class="btn ghost" id="promptCancel" type="button">取消</button>
+        <button class="btn primary" id="promptOk" type="button">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 设置 ============ -->
 <div class="modal hidden" id="settingsModal" role="dialog" aria-modal="true" aria-label="设置与备份">
   <div class="modal-card">
@@ -151,8 +206,8 @@
       <section class="set-block">
         <h3>备份与恢复</h3>
         <p class="muted small">
-          导出的 JSON 文件包含全部任务、档位、图片、星级和评语，可以拿到另一台设备上导入，
-          这就是电脑和 iPhone 之间同步数据的方式。
+          导出的 JSON 文件包含全部任务、常用任务、榜单、档位、图片、星级和评语，
+          可以拿到另一台设备上导入，这就是电脑和 iPhone 之间同步数据的方式。
         </p>
         <label class="chip"><input type="checkbox" id="exportWithImages" checked /> <span>导出时包含图片（文件较大）</span></label>
         <div class="row">
@@ -169,6 +224,16 @@
             <button class="btn ghost" id="btnCancelImport">取消</button>
           </div>
         </div>
+      </section>
+
+      <section class="set-block">
+        <h3>档位</h3>
+        <p class="muted small">当前榜单：<strong id="setBoardName">—</strong></p>
+        <p class="muted small">误删了「夯」之类的档位？点下面这个按钮补回来。</p>
+        <div class="row">
+          <button class="btn" id="btnRestoreTiers">恢复默认五档（夯 / 顶级 / 人上人 / NPC / 拉）</button>
+        </div>
+        <p class="muted small">只会补上缺失的档位，已有的档位和里面的图片不会有任何改动。</p>
       </section>
 
       <section class="set-block">

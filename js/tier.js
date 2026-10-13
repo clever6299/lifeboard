@@ -1,4 +1,4 @@
-/* LifeBoard · 夯 → 拉 榜（图片分级 + 五星评分） */
+/* LifeBoard · 夯 → 拉 榜（多榜单分类 + 图片分级 + 五星评分） */
 (function (global) {
   'use strict';
 
@@ -9,11 +9,14 @@
     { name: 'NPC', color: '#a5d8ff' },
     { name: '拉', color: '#8b98a5' }
   ];
-  const PALETTE = ['#ff7a59', '#ffa94d', '#ffd43b', '#b2f2bb', '#a5d8ff', '#d0bfff', '#ffc9de', '#8b98a5', '#63e6be', '#ff8787'];
+  const PALETTE = ['#ff7a59', '#ffa94d', '#ffd43b', '#b2f2bb', '#63e6be', '#a5d8ff',
+    '#d0bfff', '#ffc9de', '#ff8787', '#8b98a5'];
 
   const state = {
-    tiers: [],
-    items: [],
+    boards: [],
+    currentBoardId: null,
+    tiers: [],              // 全部榜单的档位
+    items: [],              // 全部榜单的卡片
     urls: {},               // imageId -> objectURL
     view: 'board',
     dragId: null,
@@ -24,6 +27,7 @@
   const el = {};
 
   function cacheEls() {
+    el.boardTabs = UI.$('#boardTabs');
     el.board = UI.$('#tierBoard');
     el.table = UI.$('#tierTable');
     el.stats = UI.$('#tierStats');
@@ -31,28 +35,74 @@
     el.modalBody = UI.$('#itemModalBody');
   }
 
-  /* ---------------- 数据 ---------------- */
+  /* ---------------- 基础查询 ---------------- */
 
-  function sortTiers(a, b) { return a.order - b.order || String(a.name).localeCompare(String(b.name)); }
+  function bySort(a, b) { return a.order - b.order; }
   function sortItems(a, b) { return a.order - b.order || a.createdAt - b.createdAt; }
+  function boardsSorted() { return state.boards.slice().sort(bySort); }
+  function currentBoard() {
+    return state.boards.find(function (b) { return b.id === state.currentBoardId; }) || null;
+  }
+  function tiersOf(boardId) {
+    return state.tiers.filter(function (t) { return t.boardId === boardId; }).sort(bySort);
+  }
+  function itemsOf(boardId, tierId) {
+    return state.items.filter(function (i) {
+      return i.boardId === boardId && i.tierId === (tierId || null);
+    }).sort(sortItems);
+  }
   function tierById(id) { return state.tiers.find(function (t) { return t.id === id; }) || null; }
   function itemById(id) { return state.items.find(function (t) { return t.id === id; }) || null; }
-  function nextOrder(tierId) {
-    const list = state.items.filter(function (i) { return i.tierId === (tierId || null); });
+  function nextOrder(boardId, tierId) {
+    const list = state.items.filter(function (i) {
+      return i.boardId === boardId && i.tierId === (tierId || null);
+    });
     return list.length ? Math.max.apply(null, list.map(function (i) { return i.order; })) + 1 : 1;
   }
-  function itemsOf(tierId) {
-    return state.items.filter(function (i) { return i.tierId === (tierId || null); }).sort(sortItems);
-  }
 
-  function ensureTiers() {
-    return LB.store.all('tiers').then(function (rows) {
-      if (rows && rows.length) { state.tiers = rows.sort(sortTiers); return null; }
-      const seeded = DEFAULT_TIERS.map(function (t, i) {
-        return { id: UI.uid('tier'), name: t.name, color: t.color, order: i };
+  /* ---------------- 榜单与档位的初始化 / 迁移 ---------------- */
+
+  /** 保证至少有一个榜单；把 schema 1 里没有 boardId 的老数据归入第一个榜单 */
+  function ensureBoards() {
+    return LB.store.all('boards').then(function (rows) {
+      const boards = (rows || []).sort(bySort);
+      if (boards.length) return { boards: boards, fresh: false };
+      const def = { id: UI.uid('board'), name: '我的榜单', order: 0, createdAt: Date.now() };
+      return LB.store.put('boards', def).then(function () {
+        return { boards: [def], fresh: true };
       });
-      state.tiers = seeded;
-      return LB.store.putMany('tiers', seeded);
+    }).then(function (out) {
+      const boards = out.boards;
+      const ids = new Set(boards.map(function (b) { return b.id; }));
+      const fallback = boards[0].id;
+
+      return LB.store.all('tiers').then(function (tiers) {
+        const broken = [];
+        (tiers || []).forEach(function (t) {
+          if (!t.boardId || !ids.has(t.boardId)) { t.boardId = fallback; broken.push(t); }
+        });
+        // 全新安装（既没有榜单也没有档位）才补默认五档；
+        // 从 schema 1 升级上来的老数据已经有自己的档位，不能重复添加。
+        if (out.fresh && (!tiers || !tiers.length)) {
+          const seeded = DEFAULT_TIERS.map(function (t, i) {
+            return { id: UI.uid('tier'), boardId: fallback, name: t.name, color: t.color, order: i };
+          });
+          return LB.store.putMany('tiers', seeded);
+        }
+        return broken.length ? LB.store.putMany('tiers', broken) : null;
+      }).then(function () {
+        return LB.store.all('items');
+      }).then(function (items) {
+        const broken = [];
+        (items || []).forEach(function (it) {
+          if (!it.boardId || !ids.has(it.boardId)) { it.boardId = fallback; broken.push(it); }
+        });
+        return broken.length ? LB.store.putMany('items', broken) : null;
+      }).then(function () {
+        state.boards = boards;
+        if (!state.currentBoardId || !ids.has(state.currentBoardId)) state.currentBoardId = boards[0].id;
+        return boards;
+      });
     });
   }
 
@@ -65,8 +115,9 @@
   }
 
   function reload() {
-    return ensureTiers()
-      .then(function () { return LB.store.all('items'); })
+    return ensureBoards()
+      .then(function () { return LB.store.all('tiers'); })
+      .then(function (rows) { state.tiers = (rows || []).sort(bySort); return LB.store.all('items'); })
       .then(function (rows) { state.items = (rows || []).sort(sortItems); return resolveUrls(); })
       .then(function () { render(); });
   }
@@ -80,9 +131,21 @@
 
   function render() {
     if (!el.board) return;
+    renderBoardTabs();
     renderBoard();
     renderTable();
     renderStats();
+  }
+
+  function renderBoardTabs() {
+    const boards = boardsSorted();
+    el.boardTabs.innerHTML = boards.map(function (b) {
+      const active = b.id === state.currentBoardId ? ' active' : '';
+      const count = state.items.filter(function (i) { return i.boardId === b.id; }).length;
+      return '<button class="board-tab' + active + '" type="button" data-board="' + b.id + '" ' +
+        'title="' + UI.esc(b.name) + '">' + UI.esc(b.name) +
+        '<span class="bt-count">' + count + '</span></button>';
+    }).join('');
   }
 
   function cardHTML(item) {
@@ -103,17 +166,19 @@
   function rowHTML(tier) {
     // tier 为 null 时表示「未分档」
     const isPool = !tier;
-    const list = itemsOf(isPool ? null : tier.id);
+    const boardId = state.currentBoardId;
+    const list = itemsOf(boardId, isPool ? null : tier.id);
     const label = isPool
-      ? '<div class="tier-label" style="background:#2b333f;color:#c6d0dc">' +
+      ? '<div class="tier-label pool-label">' +
           '<span class="tl-name">未分档</span>' +
           '<span class="tl-count">' + list.length + ' 张</span>' +
+          '<span class="tl-hint">新上传的图片先放这里</span>' +
         '</div>'
       : '<div class="tier-label" style="background:' + UI.esc(tier.color) + '">' +
           '<span class="tl-name" data-tier-name="' + tier.id + '" title="点击改名">' + UI.esc(tier.name) + '</span>' +
           '<span class="tl-count">' + list.length + ' 张</span>' +
           '<span class="tl-tools">' +
-            '<button type="button" data-tier-act="color" data-tier="' + tier.id + '" title="改颜色">色</button>' +
+            '<button type="button" data-tier-act="edit" data-tier="' + tier.id + '" title="改名字和颜色">改</button>' +
             '<button type="button" data-tier-act="up" data-tier="' + tier.id + '" title="上移">↑</button>' +
             '<button type="button" data-tier-act="down" data-tier="' + tier.id + '" title="下移">↓</button>' +
             '<button type="button" data-tier-act="del" data-tier="' + tier.id + '" title="删除档位">删</button>' +
@@ -129,16 +194,20 @@
   }
 
   function renderBoard() {
-    const tiers = state.tiers.slice().sort(sortTiers);
-    el.board.innerHTML = rowHTML(null) + tiers.map(rowHTML).join('');
+    const tiers = tiersOf(state.currentBoardId);
+    // 「未分档」固定放在最下面
+    el.board.innerHTML = tiers.map(rowHTML).join('') + rowHTML(null);
   }
 
   function renderTable() {
     if (state.view !== 'table') return;
+    const tiers = tiersOf(state.currentBoardId);
     const order = new Map();
-    state.tiers.slice().sort(sortTiers).forEach(function (t, i) { order.set(t.id, i); });
+    tiers.forEach(function (t, i) { order.set(t.id, i); });
 
-    const rows = state.items.slice().sort(function (a, b) {
+    const rows = state.items.filter(function (i) {
+      return i.boardId === state.currentBoardId;
+    }).sort(function (a, b) {
       if (b.stars !== a.stars) return b.stars - a.stars;
       const oa = a.tierId ? order.get(a.tierId) : 999;
       const ob = b.tierId ? order.get(b.tierId) : 999;
@@ -147,7 +216,7 @@
     });
 
     if (!rows.length) {
-      el.table.innerHTML = '<p class="empty muted">还没有图片，点上方的「上传图片」开始吧。</p>';
+      el.table.innerHTML = '<p class="empty muted">这个榜单还没有图片，点上方的「上传图片」开始吧。</p>';
       return;
     }
 
@@ -173,9 +242,10 @@
 
   function renderStats() {
     if (!el.stats) return;
-    const total = state.items.length;
-    if (!total) { el.stats.textContent = '还没有图片'; return; }
-    const rated = state.items.filter(function (i) { return i.stars > 0; });
+    const list = state.items.filter(function (i) { return i.boardId === state.currentBoardId; });
+    const total = list.length;
+    if (!total) { el.stats.textContent = '这个榜单还没有图片'; return; }
+    const rated = list.filter(function (i) { return i.stars > 0; });
     const avg = rated.length
       ? (rated.reduce(function (s, i) { return s + i.stars; }, 0) / rated.length).toFixed(1)
       : '—';
@@ -190,7 +260,7 @@
     state.currentItemId = id;
     const url = state.urls[item.imageId];
     const tierOptions = ['<option value="">未分档</option>'].concat(
-      state.tiers.slice().sort(sortTiers).map(function (t) {
+      tiersOf(item.boardId).map(function (t) {
         return '<option value="' + t.id + '"' + (item.tierId === t.id ? ' selected' : '') + '>' + UI.esc(t.name) + '</option>';
       })
     ).join('');
@@ -247,7 +317,7 @@
     tierSelect.addEventListener('change', function () {
       const next = tierSelect.value || null;
       item.tierId = next;
-      item.order = nextOrder(next);
+      item.order = nextOrder(item.boardId, next);
       saveItem(item).then(render);
     });
 
@@ -264,16 +334,23 @@
     });
 
     UI.$('#itDel').addEventListener('click', function () {
-      if (!confirm('删除「' + item.name + '」？图片也会从本机删除。')) return;
-      UI.closeModal('itemModal');
-      LB.image.drop(item.imageId).catch(function () {});
-      delete state.urls[item.imageId];
-      state.items = state.items.filter(function (i) { return i.id !== item.id; });
-      LB.store.del('items', item.id).then(render).catch(function (err) { UI.toast('删除失败：' + err.message, 'err'); });
+      UI.confirm({
+        title: '删除图片卡片',
+        html: '<p>确定删除「<strong>' + UI.esc(item.name) + '</strong>」吗？</p>' +
+              '<p class="muted small">这张图片会从本机一起删除，无法恢复。</p>',
+        okLabel: '删除'
+      }).then(function (ok) {
+        if (!ok) return;
+        UI.closeModal('itemModal');
+        LB.image.drop(item.imageId).catch(function () {});
+        delete state.urls[item.imageId];
+        state.items = state.items.filter(function (i) { return i.id !== item.id; });
+        LB.store.del('items', item.id).then(render).catch(function (err) { UI.toast('删除失败：' + err.message, 'err'); });
+      });
     });
 
     function step(delta) {
-      const list = state.items.slice().sort(sortItems);
+      const list = state.items.filter(function (i) { return i.boardId === item.boardId; }).sort(sortItems);
       const idx = list.findIndex(function (i) { return i.id === item.id; });
       const next = list[(idx + delta + list.length) % list.length];
       if (next) openItem(next.id);
@@ -288,18 +365,18 @@
     const item = itemById(itemId);
     if (!item) return Promise.resolve();
     const target = tierId || null;
-    const siblings = state.items
-      .filter(function (i) { return i.tierId === target && i.id !== itemId; })
-      .sort(sortItems);
+    const siblings = state.items.filter(function (i) {
+      return i.boardId === item.boardId && i.tierId === target && i.id !== itemId;
+    }).sort(sortItems);
 
     let order;
     if (beforeId) {
       const idx = siblings.findIndex(function (s) { return s.id === beforeId; });
-      if (idx < 0) order = nextOrder(target);
+      if (idx < 0) order = nextOrder(item.boardId, target);
       else if (idx === 0) order = (siblings[0].order || 1) - 1;
       else order = (siblings[idx - 1].order + siblings[idx].order) / 2;
     } else {
-      order = nextOrder(target);
+      order = nextOrder(item.boardId, target);
     }
 
     item.tierId = target;
@@ -313,6 +390,13 @@
   }
 
   function bindBoard() {
+    el.boardTabs.addEventListener('click', function (ev) {
+      const tab = ev.target.closest('[data-board]');
+      if (!tab) return;
+      state.currentBoardId = tab.dataset.board;
+      render();
+    });
+
     el.board.addEventListener('dragstart', function (ev) {
       const card = ev.target.closest('.card');
       if (!card) return;
@@ -354,7 +438,6 @@
       moveItem(moving, tierId, beforeId);
     });
 
-    // 点击卡片 → 详情（表格视图里的按钮也走这里）
     el.board.addEventListener('click', function (ev) {
       const card = ev.target.closest('.card');
       if (card) { openItem(card.dataset.item); return; }
@@ -401,75 +484,230 @@
     });
   }
 
-  let colorPicker = null;
-  function pickColor(current) {
-    return new Promise(function (resolve) {
-      if (!colorPicker) {
-        colorPicker = document.createElement('input');
-        colorPicker.type = 'color';
-        colorPicker.style.position = 'fixed';
-        colorPicker.style.left = '-9999px';
-        document.body.appendChild(colorPicker);
-      }
-      colorPicker.value = /^#[0-9a-fA-F]{6}$/.test(current) ? current : '#8b98a5';
-      let settled = false;
-      const done = function (value) { if (settled) return; settled = true; colorPicker.removeEventListener('change', onChange); resolve(value); };
-      const onChange = function () { done(colorPicker.value); };
-      colorPicker.addEventListener('change', onChange);
-      colorPicker.click();
-      setTimeout(function () { done(colorPicker.value); }, 20000);
-    });
-  }
-
   function tierAction(action, tierId) {
     const tier = tierById(tierId);
     if (!tier) return;
-    const sorted = state.tiers.slice().sort(sortTiers);
+    const sorted = tiersOf(tier.boardId);
     const idx = sorted.findIndex(function (t) { return t.id === tierId; });
 
-    if (action === 'color') {
-      pickColor(tier.color).then(function (color) {
-        tier.color = color;
-        return LB.store.put('tiers', tier).then(render);
+    if (action === 'edit') {
+      UI.prompt({
+        title: '编辑档位',
+        label: '档位名称',
+        value: tier.name,
+        color: tier.color,
+        colors: PALETTE,
+        hint: '点下面的色块换颜色。',
+        okLabel: '保存'
+      }).then(function (res) {
+        if (!res) return;
+        tier.name = res.value.slice(0, 40);
+        if (res.color) tier.color = res.color;
+        LB.store.put('tiers', tier).then(render);
       });
     } else if (action === 'up' && idx > 0) {
       const other = sorted[idx - 1];
       const tmp = tier.order; tier.order = other.order; other.order = tmp;
       return LB.store.putMany('tiers', [tier, other]).then(function () {
-        state.tiers.sort(sortTiers); render();
+        state.tiers.sort(bySort); render();
       });
     } else if (action === 'down' && idx < sorted.length - 1) {
       const other = sorted[idx + 1];
       const tmp = tier.order; tier.order = other.order; other.order = tmp;
       return LB.store.putMany('tiers', [tier, other]).then(function () {
-        state.tiers.sort(sortTiers); render();
+        state.tiers.sort(bySort); render();
       });
     } else if (action === 'del') {
-      if (!confirm('删除档位「' + tier.name + '」？里面的图片会回到「未分档」。')) return;
-      state.items.forEach(function (it) {
-        if (it.tierId === tierId) { it.tierId = null; it.order = nextOrder(null); saveItem(it); }
-      });
-      state.tiers = state.tiers.filter(function (t) { return t.id !== tierId; });
-      return LB.store.del('tiers', tierId).then(function () {
-        state.items.sort(sortItems); render();
+      const count = itemsOf(tier.boardId, tier.id).length;
+      UI.confirm({
+        title: '删除档位',
+        html: '<p>确定删除档位「<strong>' + UI.esc(tier.name) + '</strong>」吗？</p>' +
+              '<p class="muted small">' + (count
+                ? '里面的 ' + count + ' 张图片会回到「未分档」，图片本身不会丢。'
+                : '这个档位里没有图片。') + '</p>',
+        okLabel: '删除档位'
+      }).then(function (ok) {
+        if (!ok) return;
+        state.items.forEach(function (it) {
+          if (it.tierId === tierId) {
+            it.tierId = null;
+            it.order = nextOrder(it.boardId, null);
+            saveItem(it);
+          }
+        });
+        state.tiers = state.tiers.filter(function (t) { return t.id !== tierId; });
+        LB.store.del('tiers', tierId).then(function () {
+          state.items.sort(sortItems);
+          render();
+          UI.toast('已删除档位「' + tier.name + '」', 'ok');
+        });
       });
     }
   }
 
   function addTier() {
-    const name = prompt('新档位名称', '新档位');
-    if (name === null) return;
-    const clean = name.trim().slice(0, 40) || '新档位';
-    const order = state.tiers.length ? Math.max.apply(null, state.tiers.map(function (t) { return t.order; })) + 1 : 0;
-    const tier = {
-      id: UI.uid('tier'),
-      name: clean,
-      color: PALETTE[state.tiers.length % PALETTE.length],
-      order: order
-    };
-    state.tiers.push(tier);
-    state.tiers.sort(sortTiers);
-    LB.store.put('tiers', tier).then(render);
+    UI.prompt({
+      title: '新增档位',
+      label: '档位名称',
+      value: '',
+      placeholder: '例如：神中神',
+      color: PALETTE[tiersOf(state.currentBoardId).length % PALETTE.length],
+      colors: PALETTE,
+      hint: '点色块挑一个颜色。',
+      okLabel: '创建'
+    }).then(function (res) {
+      if (!res) return;
+      const list = tiersOf(state.currentBoardId);
+      const order = list.length ? Math.max.apply(null, list.map(function (t) { return t.order; })) + 1 : 0;
+      const tier = {
+        id: UI.uid('tier'),
+        boardId: state.currentBoardId,
+        name: res.value.slice(0, 40),
+        color: res.color || PALETTE[0],
+        order: order
+      };
+      state.tiers.push(tier);
+      state.tiers.sort(bySort);
+      LB.store.put('tiers', tier).then(render);
+    });
+  }
+
+  /** 把默认五档里缺的补回来（用于误删恢复），并放回它在默认顺序里的位置 */
+  function restoreDefaultTiers() {
+    const boardId = state.currentBoardId;
+    const list = tiersOf(boardId);            // 已按 order 排好；下面是副本，改它不影响 state
+    const missing = DEFAULT_TIERS.filter(function (d) {
+      return !list.some(function (t) { return t.name === d.name; });
+    });
+    if (!missing.length) return Promise.resolve(0);
+
+    const created = [];
+    missing.forEach(function (d) {
+      const defaultIndex = DEFAULT_TIERS.findIndex(function (x) { return x.name === d.name; });
+
+      // 在默认顺序里，找它后面第一个还存在的档位，插到那个档位前面
+      let nextTier = null;
+      for (let j = defaultIndex + 1; j < DEFAULT_TIERS.length; j++) {
+        const found = list.find(function (t) { return t.name === DEFAULT_TIERS[j].name; });
+        if (found) { nextTier = found; break; }
+      }
+
+      let order;
+      if (nextTier) {
+        const before = list.filter(function (t) { return t.order < nextTier.order; }).sort(bySort).pop() || null;
+        order = before ? (before.order + nextTier.order) / 2 : nextTier.order - 1;
+      } else {
+        order = list.length ? Math.max.apply(null, list.map(function (t) { return t.order; })) + 1 : 0;
+      }
+
+      const tier = { id: UI.uid('tier'), boardId: boardId, name: d.name, color: d.color, order: order };
+      list.push(tier);
+      list.sort(bySort);
+      created.push(tier);
+    });
+
+    state.tiers = state.tiers.concat(created);
+    return LB.store.putMany('tiers', created).then(function () {
+      state.tiers.sort(bySort);
+      render();
+      return created.length;
+    });
+  }
+
+  /* ---------------- 榜单操作 ---------------- */
+
+  function addBoard() {
+    UI.prompt({
+      title: '新建榜单',
+      label: '榜单名称',
+      value: '',
+      placeholder: '例如：国内山的综合评价',
+      hint: '每个榜单有自己独立的档位和图片，互不干扰。新建时会自动带上默认五档。',
+      okLabel: '创建'
+    }).then(function (res) {
+      if (!res) return;
+      const list = boardsSorted();
+      const order = list.length ? Math.max.apply(null, list.map(function (b) { return b.order; })) + 1 : 0;
+      const board = { id: UI.uid('board'), name: res.value.slice(0, 60), order: order, createdAt: Date.now() };
+      const tiers = DEFAULT_TIERS.map(function (t, i) {
+        return { id: UI.uid('tier'), boardId: board.id, name: t.name, color: t.color, order: i };
+      });
+      state.boards.push(board);
+      state.tiers = state.tiers.concat(tiers);
+      state.currentBoardId = board.id;
+      LB.store.put('boards', board).then(function () {
+        return LB.store.putMany('tiers', tiers);
+      }).then(function () {
+        render();
+        UI.toast('已创建榜单「' + board.name + '」', 'ok');
+      });
+    });
+  }
+
+  function renameBoard() {
+    const board = currentBoard();
+    if (!board) return;
+    UI.prompt({
+      title: '重命名榜单',
+      label: '榜单名称',
+      value: board.name,
+      okLabel: '保存'
+    }).then(function (res) {
+      if (!res) return;
+      board.name = res.value.slice(0, 60);
+      LB.store.put('boards', board).then(render);
+    });
+  }
+
+  function deleteBoard() {
+    const board = currentBoard();
+    if (!board) return;
+    if (state.boards.length <= 1) {
+      UI.toast('至少要保留一个榜单，不能删除最后一个', 'err');
+      return;
+    }
+    const count = state.items.filter(function (i) { return i.boardId === board.id; }).length;
+    const tierCount = tiersOf(board.id).length;
+
+    UI.confirm({
+      title: '删除榜单',
+      html: '<p>确定删除榜单「<strong>' + UI.esc(board.name) + '</strong>」吗？</p>' +
+            '<p class="muted small">它的 ' + tierCount + ' 个档位、' + count + ' 张图片卡片以及对应的图片文件都会被删除，' +
+            '无法恢复。其他榜单不受影响。</p>',
+      okLabel: '删除榜单'
+    }).then(function (ok) {
+      if (!ok) return;
+
+      // 先把要删的 ID 收集起来，一会儿 state 里就查不到了
+      const doomedTiers = tiersOf(board.id);
+      const doomedItems = state.items.filter(function (i) { return i.boardId === board.id; });
+      const imageIds = doomedItems.map(function (i) { return i.imageId; });
+      const stillUsed = new Set(state.items
+        .filter(function (i) { return i.boardId !== board.id; })
+        .map(function (i) { return i.imageId; }));
+
+      state.boards = state.boards.filter(function (b) { return b.id !== board.id; });
+      state.tiers = state.tiers.filter(function (t) { return t.boardId !== board.id; });
+      state.items = state.items.filter(function (i) { return i.boardId !== board.id; });
+      state.currentBoardId = boardsSorted()[0].id;
+
+      const jobs = [LB.store.del('boards', board.id)];
+      doomedTiers.forEach(function (t) { jobs.push(LB.store.del('tiers', t.id)); });
+      doomedItems.forEach(function (i) { jobs.push(LB.store.del('items', i.id)); });
+      imageIds.forEach(function (id) {
+        if (stillUsed.has(id)) return;
+        delete state.urls[id];
+        jobs.push(LB.image.drop(id).catch(function () {}));
+      });
+
+      Promise.all(jobs).then(function () {
+        render();
+        UI.toast('已删除榜单「' + board.name + '」', 'ok');
+      }).catch(function (err) {
+        UI.toast('删除时出错：' + err.message, 'err');
+        reload();
+      });
+    });
   }
 
   /* ---------------- 上传 ---------------- */
@@ -480,9 +718,10 @@
     });
     if (!files.length) { UI.toast('没有找到可用的图片文件', 'err'); return Promise.resolve(); }
 
+    const boardId = state.currentBoardId;
+    const tier = targetTierId || null;
     let done = 0;
     let failed = 0;
-    const tier = targetTierId || null;
     UI.busy(true, '正在处理图片 0/' + files.length + '…');
 
     let chain = Promise.resolve();
@@ -494,12 +733,13 @@
           state.urls[rec.id] = url;
           const item = {
             id: UI.uid('item'),
+            boardId: boardId,
             imageId: rec.id,
             tierId: tier,
             name: String(file.name || '未命名').replace(/\.[^.]+$/, '').slice(0, 200) || '未命名',
             stars: 0,
             comment: '',
-            order: nextOrder(tier),
+            order: nextOrder(boardId, tier),
             w: rec.width,
             h: rec.height,
             createdAt: Date.now(),
@@ -521,9 +761,10 @@
     return chain.then(function () {
       UI.busy(false);
       state.items.sort(sortItems);
+      const board = currentBoard();
       render();
       if (failed) UI.toast('有 ' + failed + ' 张图片处理失败，其余已添加', 'err');
-      else UI.toast('已添加 ' + files.length + ' 张图片', 'ok');
+      else UI.toast('已添加 ' + files.length + ' 张图片到「' + ((board && board.name) || '榜单') + '」的未分档', 'ok');
     }).catch(function (err) {
       UI.busy(false);
       render();
@@ -584,6 +825,9 @@
 
     UI.$('#btnUpload').addEventListener('click', function () { el.fileInput.click(); });
     UI.$('#btnAddTier').addEventListener('click', addTier);
+    UI.$('#btnAddBoard').addEventListener('click', addBoard);
+    UI.$('#btnRenameBoard').addEventListener('click', renameBoard);
+    UI.$('#btnDeleteBoard').addEventListener('click', deleteBoard);
     el.fileInput.addEventListener('change', function () {
       if (el.fileInput.files && el.fileInput.files.length) addFiles(el.fileInput.files, null);
       el.fileInput.value = '';
@@ -609,6 +853,8 @@
     reload: reload,
     render: render,
     addFiles: addFiles,
+    restoreDefaultTiers: restoreDefaultTiers,
+    currentBoardName: function () { const b = currentBoard(); return b ? b.name : '—'; },
     state: state
   };
 })(window);

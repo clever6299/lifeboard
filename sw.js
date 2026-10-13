@@ -1,8 +1,12 @@
 /* LifeBoard · 离线缓存
- * 策略：应用外壳走 stale-while-revalidate；其余同源 GET 走 cache-first。
- * 数据全部在 IndexedDB 里，这里只缓存页面本身，所以换版本时改 CACHE 名即可。
+ *
+ * 策略：**网络优先，断网时才回退到缓存**。
+ * 这个应用的目的是"断网也能打开"，不是"加载更快"，所以优先保证拿到最新代码——
+ * 用缓存优先的话，改完代码已经打开过网站的设备会一直跑旧版本（旧的 HTML 配上新的 JS 还会直接出错）。
+ *
+ * 数据全部在 IndexedDB 里，这里只缓存页面本身。
  */
-const CACHE = 'lifeboard-v1';
+const CACHE = 'lifeboard-v2';
 const SHELL = [
   './',
   './index.html',
@@ -42,34 +46,28 @@ self.addEventListener('activate', function (event) {
 self.addEventListener('fetch', function (event) {
   const req = event.request;
   if (req.method !== 'GET') return;
-  const url = new URL(req.url);
+  let url;
+  try { url = new URL(req.url); } catch (err) { return; }
   if (url.origin !== self.location.origin) return;
 
-  if (req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).then(function (res) {
-        const copy = res.clone();
-        caches.open(CACHE).then(function (c) { c.put('./index.html', copy); });
-        return res;
-      }).catch(function () {
-        return caches.match('./index.html').then(function (hit) {
-          return hit || caches.match('./');
-        });
-      })
-    );
-    return;
-  }
-
   event.respondWith(
-    caches.match(req).then(function (hit) {
-      const network = fetch(req).then(function (res) {
-        if (res && res.status === 200 && res.type === 'basic') {
-          const copy = res.clone();
-          caches.open(CACHE).then(function (c) { c.put(req, copy); });
+    fetch(req).then(function (res) {
+      if (res && res.status === 200 && res.type === 'basic') {
+        const copy = res.clone();
+        caches.open(CACHE).then(function (c) { c.put(req, copy); }).catch(function () {});
+      }
+      return res;
+    }).catch(function () {
+      // 断网了：先用精确缓存，再退回页面外壳
+      return caches.match(req).then(function (hit) {
+        if (hit) return hit;
+        if (req.mode === 'navigate') {
+          return caches.match('./index.html').then(function (page) {
+            return page || caches.match('./');
+          });
         }
-        return res;
-      }).catch(function () { return hit; });
-      return hit || network;
+        return Response.error();
+      });
     })
   );
 });

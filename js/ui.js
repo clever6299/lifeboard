@@ -72,7 +72,7 @@
     el.textContent = message;
     el.className = 'toast' + (kind ? ' ' + kind : '');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { el.className = 'toast hidden'; }, kind === 'err' ? 5200 : 2600);
+    toastTimer = setTimeout(function () { el.className = 'toast hidden'; }, kind === 'err' ? 5200 : 2800);
   };
 
   /* ---------- 忙碌遮罩 ---------- */
@@ -88,6 +88,133 @@
   /* ---------- 弹窗 ---------- */
   UI.openModal = function (id) { const m = document.getElementById(id); if (m) m.classList.remove('hidden'); };
   UI.closeModal = function (id) { const m = document.getElementById(id); if (m) m.classList.add('hidden'); };
+
+  /* 带 data-static 的弹窗自己处理关闭（确认框、输入框需要把关闭结果回传给调用方） */
+  let dismissHandler = null;
+
+  function bindStaticModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    const dismiss = function () {
+      if (!dismissHandler) return;
+      const handler = dismissHandler;
+      dismissHandler = null;
+      handler();
+    };
+    modal.addEventListener('click', function (ev) { if (ev.target === modal) dismiss(); });
+    const closeBtn = modal.querySelector('[data-close]');
+    if (closeBtn) closeBtn.addEventListener('click', dismiss);
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && !modal.classList.contains('hidden')) dismiss();
+    });
+  }
+  bindStaticModal('confirmModal');
+  bindStaticModal('promptModal');
+
+  /**
+   * 自定义确认框，替代浏览器原生 confirm。
+   * UI.confirm('要删掉吗？')
+   * UI.confirm({ title, message, html, okLabel, okClass, cancelLabel }) → Promise<boolean>
+   */
+  UI.confirm = function (opts) {
+    const o = typeof opts === 'string' ? { message: opts } : (opts || {});
+    const modal = document.getElementById('confirmModal');
+    if (!modal) return Promise.resolve(global.confirm(o.message || '确定吗？'));
+
+    UI.$('#confirmTitle').textContent = o.title || '确认操作';
+    UI.$('#confirmMessage').innerHTML = o.html
+      ? o.html
+      : '<p>' + UI.esc(o.message || '确定要执行这个操作吗？') + '</p>';
+
+    const ok = UI.$('#confirmOk');
+    const cancel = UI.$('#confirmCancel');
+    ok.textContent = o.okLabel || '删除';
+    ok.className = 'btn ' + (o.okClass || 'danger');
+    cancel.textContent = o.cancelLabel || '取消';
+
+    UI.openModal('confirmModal');
+    setTimeout(function () { ok.focus(); }, 30);
+
+    return new Promise(function (resolve) {
+      const finish = function (value) {
+        dismissHandler = null;
+        ok.onclick = null;
+        cancel.onclick = null;
+        UI.closeModal('confirmModal');
+        resolve(value);
+      };
+      dismissHandler = function () { finish(false); };
+      ok.onclick = function () { finish(true); };
+      cancel.onclick = function () { finish(false); };
+    });
+  };
+
+  /**
+   * 自定义输入框，替代浏览器原生 prompt，可选一条颜色供挑选。
+   * UI.prompt({ title, label, value, placeholder, colors, color }) → Promise<{value,color}|null>
+   */
+  UI.prompt = function (opts) {
+    const o = opts || {};
+    const modal = document.getElementById('promptModal');
+    if (!modal) {
+      const v = global.prompt(o.label || '输入', o.value || '');
+      return Promise.resolve(v === null ? null : { value: v, color: o.color || null });
+    }
+
+    UI.$('#promptTitle').textContent = o.title || '输入';
+    UI.$('#promptLabel').textContent = o.label || '名称';
+    UI.$('#promptHint').textContent = o.hint || '';
+    UI.$('#promptOk').textContent = o.okLabel || '确定';
+
+    const input = UI.$('#promptInput');
+    input.value = o.value || '';
+    input.placeholder = o.placeholder || '';
+    input.maxLength = o.maxLength || 60;
+
+    const swatches = UI.$('#promptSwatches');
+    let picked = o.color || (o.colors && o.colors[0]) || null;
+    if (o.colors && o.colors.length) {
+      swatches.classList.remove('hidden');
+      swatches.innerHTML = o.colors.map(function (c) {
+        return '<button type="button" class="swatch' + (c === picked ? ' on' : '') + '" data-color="' + c +
+          '" style="background:' + c + '" aria-label="颜色 ' + c + '"></button>';
+      }).join('');
+      swatches.onclick = function (ev) {
+        const btn = ev.target.closest('[data-color]');
+        if (!btn) return;
+        picked = btn.dataset.color;
+        UI.$$('.swatch', swatches).forEach(function (s) { s.classList.toggle('on', s === btn); });
+      };
+    } else {
+      swatches.classList.add('hidden');
+      swatches.innerHTML = '';
+      swatches.onclick = null;
+    }
+
+    UI.openModal('promptModal');
+    setTimeout(function () { input.focus(); input.select(); }, 30);
+
+    return new Promise(function (resolve) {
+      const finish = function (value) {
+        dismissHandler = null;
+        UI.$('#promptOk').onclick = null;
+        UI.$('#promptCancel').onclick = null;
+        input.onkeydown = null;
+        UI.closeModal('promptModal');
+        resolve(value);
+      };
+      dismissHandler = function () { finish(null); };
+      UI.$('#promptOk').onclick = function () {
+        const value = input.value.trim();
+        if (!value) { input.focus(); return; }
+        finish({ value: value, color: picked });
+      };
+      UI.$('#promptCancel').onclick = function () { finish(null); };
+      input.onkeydown = function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); UI.$('#promptOk').click(); }
+      };
+    });
+  };
 
   /* ---------- 下载 ---------- */
   UI.download = function (filename, text, mime) {

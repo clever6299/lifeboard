@@ -2,20 +2,25 @@
  * IndexedDB 封装 + 图片压缩 + 导入导出。无外部依赖。
  * 挂在 window.LB.store / window.LB.image 上。
  *
- * 数据模型
- *   tasks  { id, date:'YYYY-MM-DD', title, note, done, priority:0|1|2, createdAt, updatedAt }
- *   tiers  { id, name, color, order }
- *   items  { id, imageId, tierId:null|string, name, stars:0..5, comment, order, w, h, createdAt, updatedAt }
- *   images { id, name, type, width, height, size, blob, createdAt }
+ * 数据模型（schema 2）
+ *   boards    { id, name, order, createdAt }
+ *   tasks     { id, date:'YYYY-MM-DD', title, note, done, priority:0|1|2, createdAt, updatedAt }
+ *   templates { id, title, note, priority, useCount, createdAt }          常用任务
+ *   tiers     { id, boardId, name, color, order }
+ *   items     { id, boardId, imageId, tierId:null|string, name, stars:0..5, comment, order, w, h, createdAt, updatedAt }
+ *   images    { id, name, type, width, height, size, blob, createdAt }
+ *
+ * 从 schema 1 升级：新增 boards / templates 两个对象仓库，老数据里的 tiers / items
+ * 没有 boardId，由 tier.js 的 ensureBoards() 归入自动创建的默认榜单。
  */
 (function (global) {
   'use strict';
 
   const DB_NAME = 'lifeboard';
-  const DB_VERSION = 1;
-  const STORES = ['tasks', 'tiers', 'items', 'images'];
+  const DB_VERSION = 2;
+  const STORES = ['boards', 'tasks', 'templates', 'tiers', 'items', 'images'];
   const APP_TAG = 'lifeboard';
-  const SCHEMA = 1;
+  const SCHEMA = 2;
 
   let dbPromise = null;
 
@@ -224,9 +229,11 @@
       app: APP_TAG,
       schema: SCHEMA,
       exportedAt: new Date().toISOString(),
-      tasks: [], tiers: [], items: [], images: []
+      boards: [], tasks: [], templates: [], tiers: [], items: [], images: []
     };
-    return store.all('tasks').then(function (rows) { payload.tasks = rows; })
+    return store.all('boards').then(function (rows) { payload.boards = rows; })
+      .then(function () { return store.all('tasks'); }).then(function (rows) { payload.tasks = rows; })
+      .then(function () { return store.all('templates'); }).then(function (rows) { payload.templates = rows; })
       .then(function () { return store.all('tiers'); }).then(function (rows) { payload.tiers = rows; })
       .then(function () { return store.all('items'); }).then(function (rows) { payload.items = rows; })
       .then(function () {
@@ -245,12 +252,26 @@
       .then(function () { return payload; });
   }
 
-  /** 校验并规范化备份内容 */
+  /** 校验并规范化备份内容（schema 1 的老备份同样接受） */
   function normalize(payload) {
     if (!payload || typeof payload !== 'object') throw new Error('备份文件内容无法解析');
     if (payload.app !== APP_TAG) throw new Error('这不是 LifeBoard 的备份文件');
     const str = function (v, fallback) { return typeof v === 'string' && v ? v : (fallback || ''); };
     const num = function (v, fallback) { return typeof v === 'number' && isFinite(v) ? v : fallback; };
+
+    const boards = (Array.isArray(payload.boards) ? payload.boards : []).map(function (b, i) {
+      return {
+        id: str(b && b.id) || UI.uid('board'),
+        name: str(b && b.name, '未命名榜单').slice(0, 60),
+        order: num(b && b.order, i),
+        createdAt: num(b && b.createdAt, Date.now())
+      };
+    });
+    const boardIds = new Set(boards.map(function (b) { return b.id; }));
+    const boardOf = function (v) {
+      const id = str(v);
+      return id && boardIds.has(id) ? id : null;   // 归不到具体榜单的交给 ensureBoards()
+    };
 
     const tasks = (Array.isArray(payload.tasks) ? payload.tasks : []).map(function (t) {
       return {
@@ -265,9 +286,21 @@
       };
     });
 
+    const templates = (Array.isArray(payload.templates) ? payload.templates : []).map(function (t) {
+      return {
+        id: str(t && t.id) || UI.uid('tpl'),
+        title: str(t && t.title).slice(0, 200),
+        note: str(t && t.note).slice(0, 5000),
+        priority: Math.min(2, Math.max(0, Math.round(num(t && t.priority, 0)))),
+        useCount: Math.max(0, Math.round(num(t && t.useCount, 0))),
+        createdAt: num(t && t.createdAt, Date.now())
+      };
+    }).filter(function (t) { return t.title; });
+
     const tiers = (Array.isArray(payload.tiers) ? payload.tiers : []).map(function (g, i) {
       return {
         id: str(g && g.id) || UI.uid('tier'),
+        boardId: boardOf(g && g.boardId),
         name: str(g && g.name, '未命名档位').slice(0, 40),
         color: /^#[0-9a-fA-F]{3,8}$/.test(g && g.color) ? g.color : '#9aa4b2',
         order: num(g && g.order, i)
@@ -279,6 +312,7 @@
       const tierId = it && typeof it.tierId === 'string' && tierIds.has(it.tierId) ? it.tierId : null;
       return {
         id: str(it && it.id) || UI.uid('item'),
+        boardId: boardOf(it && it.boardId),
         imageId: str(it && it.imageId),
         tierId: tierId,
         name: str(it && it.name, '未命名').slice(0, 200),
@@ -314,7 +348,10 @@
     const keepAllRefs = images.length === 0; // 不含图片的备份：保留卡片，图片可能已在库里
     const usable = keepAllRefs ? items : items.filter(function (it) { return imageIds.has(it.imageId); });
 
-    return { tasks: tasks, tiers: tiers, items: usable, images: images, dropped: items.length - usable.length };
+    return {
+      boards: boards, tasks: tasks, templates: templates, tiers: tiers,
+      items: usable, images: images, dropped: items.length - usable.length
+    };
   }
 
   /**
@@ -331,7 +368,11 @@
     return prep.then(function () {
       return store.putMany('images', data.images);
     }).then(function () {
+      return store.putMany('boards', data.boards);
+    }).then(function () {
       return store.putMany('tasks', data.tasks);
+    }).then(function () {
+      return store.putMany('templates', data.templates);
     }).then(function () {
       return store.putMany('tiers', data.tiers);
     }).then(function () {
@@ -339,7 +380,9 @@
     }).then(function () {
       image.clearCache();
       return {
+        boards: data.boards.length,
         tasks: data.tasks.length,
+        templates: data.templates.length,
         tiers: data.tiers.length,
         items: data.items.length,
         images: data.images.length,
@@ -355,4 +398,5 @@
   global.LB.importAll = importAll;
   global.LB.normalize = normalize;
   global.LB.APP_TAG = APP_TAG;
+  global.LB.SCHEMA = SCHEMA;
 })(window);

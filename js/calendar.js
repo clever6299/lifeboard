@@ -1,4 +1,4 @@
-/* LifeBoard · 日历任务页 */
+/* LifeBoard · 日历任务页（含"常用任务"） */
 (function (global) {
   'use strict';
 
@@ -6,8 +6,10 @@
     cursor: new Date(),          // 当前显示的月份（该月 1 号）
     selected: UI.todayKey(),     // 选中的日期
     tasks: [],
+    templates: [],
     onlyUndone: false,
     editingId: null,
+    tplOpen: false,
     ready: false
   };
 
@@ -27,6 +29,10 @@
     el.addPriority = UI.$('#addPriority');
     el.showUndone = UI.$('#showUndone');
     el.undoneHint = UI.$('#undoneHint');
+    el.tplToggle = UI.$('#btnTplToggle');
+    el.tplCount = UI.$('#tplCount');
+    el.tplList = UI.$('#tplList');
+    el.saveTpl = UI.$('#btnSaveTpl');
   }
 
   /* ---------------- 数据 ---------------- */
@@ -47,9 +53,17 @@
     return map;
   }
 
+  function sortedTemplates() {
+    return state.templates.slice().sort(function (a, b) {
+      if (b.useCount !== a.useCount) return b.useCount - a.useCount;
+      return b.createdAt - a.createdAt;
+    });
+  }
+
   function reload() {
-    return LB.store.all('tasks').then(function (rows) {
-      state.tasks = rows || [];
+    return Promise.all([LB.store.all('tasks'), LB.store.all('templates')]).then(function (rows) {
+      state.tasks = rows[0] || [];
+      state.templates = rows[1] || [];
       render();
     });
   }
@@ -65,6 +79,7 @@
     if (!el.grid) return;
     renderGrid();
     renderDay();
+    renderTemplates();
   }
 
   function renderGrid() {
@@ -217,10 +232,108 @@
         meta +
       '</div>' +
       '<div class="t-actions">' +
+        '<button class="mini" data-act="tpl" title="存为常用任务" type="button">☆</button>' +
         '<button class="mini" data-act="edit" title="编辑" type="button">✎</button>' +
         '<button class="mini" data-act="delete" title="删除" type="button">🗑</button>' +
       '</div>' +
     '</li>';
+  }
+
+  /* ---------------- 渲染：常用任务 ---------------- */
+
+  function renderTemplates() {
+    const list = sortedTemplates();
+    el.tplCount.textContent = String(list.length);
+    el.tplToggle.setAttribute('aria-expanded', state.tplOpen ? 'true' : 'false');
+    el.tplList.classList.toggle('hidden', !state.tplOpen);
+
+    if (!state.tplOpen) return;
+
+    if (!list.length) {
+      el.tplList.innerHTML = '<p class="muted small tpl-empty">还没有常用任务。' +
+        '在输入框里写好内容后点「＋ 存为常用」，或者点任务右边的 ☆ 把已有任务存下来。</p>';
+      return;
+    }
+
+    el.tplList.innerHTML = list.map(function (t) {
+      return '<span class="tpl-chip" data-tpl="' + t.id + '">' +
+        '<button class="tpl-use" type="button" data-tpl-use="' + t.id + '" title="' +
+          UI.esc(t.note ? t.title + ' · ' + t.note : t.title) + '">' +
+          '<i class="dot p' + t.priority + '"></i>' + UI.esc(t.title) +
+          (t.useCount ? '<span class="tpl-count">×' + t.useCount + '</span>' : '') +
+        '</button>' +
+        '<button class="tpl-del" type="button" data-tpl-del="' + t.id + '" title="删除这个常用任务">✕</button>' +
+      '</span>';
+    }).join('');
+  }
+
+  /* ---------------- 常用任务操作 ---------------- */
+
+  function templateExists(title) {
+    const key = String(title).trim().toLowerCase();
+    return state.templates.some(function (t) { return t.title.trim().toLowerCase() === key; });
+  }
+
+  function addTemplate(title, note, priority) {
+    const clean = String(title || '').trim().slice(0, 200);
+    if (!clean) { UI.toast('先写上任务内容，再存为常用', 'err'); return Promise.resolve(false); }
+    if (templateExists(clean)) { UI.toast('「' + clean + '」已经在常用任务里了', 'err'); return Promise.resolve(false); }
+
+    const tpl = {
+      id: UI.uid('tpl'),
+      title: clean,
+      note: String(note || '').trim().slice(0, 5000),
+      priority: Math.min(2, Math.max(0, parseInt(priority, 10) || 0)),
+      useCount: 0,
+      createdAt: Date.now()
+    };
+    return LB.store.put('templates', tpl).then(function () {
+      return LB.store.all('templates');
+    }).then(function (rows) {
+      state.templates = rows || [];
+      state.tplOpen = true;
+      renderTemplates();
+      UI.toast('已存为常用：' + clean, 'ok');
+      return true;
+    });
+  }
+
+  function useTemplate(id) {
+    const tpl = state.templates.find(function (t) { return t.id === id; });
+    if (!tpl) return;
+    const task = {
+      id: UI.uid('task'),
+      date: state.selected,
+      title: tpl.title,
+      note: tpl.note || '',
+      done: false,
+      priority: tpl.priority || 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    tpl.useCount = (tpl.useCount || 0) + 1;
+    LB.store.put('templates', tpl);
+    save(task).then(function () {
+      UI.toast('已添加到 ' + UI.friendly(state.selected, false) + '：' + tpl.title, 'ok');
+    }).catch(function (err) { UI.toast('添加失败：' + err.message, 'err'); });
+  }
+
+  function deleteTemplate(id) {
+    const tpl = state.templates.find(function (t) { return t.id === id; });
+    if (!tpl) return;
+    UI.confirm({
+      title: '删除常用任务',
+      html: '<p>确定要从常用任务里删掉「<strong>' + UI.esc(tpl.title) + '</strong>」吗？</p>' +
+            '<p class="muted small">已经用它添加过的任务不受影响，只是以后不能一键添加了。</p>',
+      okLabel: '删除'
+    }).then(function (ok) {
+      if (!ok) return;
+      LB.store.del('templates', id).then(function () {
+        state.templates = state.templates.filter(function (t) { return t.id !== id; });
+        renderTemplates();
+        UI.toast('已删除常用任务', 'ok');
+      }).catch(function (err) { UI.toast('删除失败：' + err.message, 'err'); });
+    });
   }
 
   /* ---------------- 交互 ---------------- */
@@ -268,6 +381,22 @@
       renderDay();
     });
 
+    /* 常用任务面板 */
+    el.tplToggle.addEventListener('click', function () {
+      state.tplOpen = !state.tplOpen;
+      renderTemplates();
+    });
+    el.saveTpl.addEventListener('click', function () {
+      addTemplate(el.addTitle.value, '', el.addPriority.value);
+    });
+    el.tplList.addEventListener('click', function (ev) {
+      const use = ev.target.closest('[data-tpl-use]');
+      if (use) { useTemplate(use.dataset.tplUse); return; }
+      const del = ev.target.closest('[data-tpl-del]');
+      if (del) { deleteTemplate(del.dataset.tplDel); }
+    });
+
+    /* 添加任务 */
     el.addForm.addEventListener('submit', function (ev) {
       ev.preventDefault();
       const title = el.addTitle.value.trim();
@@ -288,14 +417,15 @@
       }).catch(function (err) { UI.toast('保存失败：' + err.message, 'err'); });
     });
 
+    /* 任务列表操作 */
     el.list.addEventListener('click', function (ev) {
       const li = ev.target.closest('.task');
       if (!li) return;
       const id = li.dataset.id;
       const task = state.tasks.find(function (t) { return t.id === id; });
       if (!task) return;
-      const act = ev.target.dataset.act ||
-        (ev.target.closest('[data-act]') ? ev.target.closest('[data-act]').dataset.act : '');
+      const hit = ev.target.closest('[data-act]');
+      const act = hit ? hit.dataset.act : '';
 
       if (act === 'toggle') {
         task.done = ev.target.checked;
@@ -305,12 +435,21 @@
         renderDay();
         const input = el.list.querySelector('.task.editing .e-title');
         if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+      } else if (act === 'tpl') {
+        addTemplate(task.title, task.note, task.priority);
       } else if (act === 'cancel') {
         state.editingId = null;
         renderDay();
       } else if (act === 'delete') {
-        if (!confirm('删除任务「' + task.title + '」？')) return;
-        LB.store.del('tasks', id).then(reload).catch(function (err) { UI.toast('删除失败：' + err.message, 'err'); });
+        UI.confirm({
+          title: '删除任务',
+          html: '<p>确定删除任务「<strong>' + UI.esc(task.title) + '</strong>」吗？</p>' +
+                '<p class="muted small">' + UI.esc(UI.friendly(task.date)) + ' · 删除后无法恢复。</p>',
+          okLabel: '删除'
+        }).then(function (ok) {
+          if (!ok) return;
+          LB.store.del('tasks', id).then(reload).catch(function (err) { UI.toast('删除失败：' + err.message, 'err'); });
+        });
       } else if (act === 'save') {
         const title = li.querySelector('.e-title').value.trim();
         if (!title) { UI.toast('任务内容不能为空', 'err'); return; }
