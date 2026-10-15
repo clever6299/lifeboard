@@ -186,11 +186,11 @@
 
   /* ---------------- 同步主流程 ---------------- */
 
-  function run() {
+  function run(transport) {
     if (state.busy) return Promise.resolve(null);
     state.busy = true;
     const started = Date.now();
-    const t = activeTransport();
+    const t = transport || activeTransport();
     let pushedImages = 0;
     let pulledImages = 0;
 
@@ -256,6 +256,29 @@
     }).catch(function (err) {
       state.busy = false;
       throw err;
+    });
+  }
+
+  /** 云端连不上时自动回退
+   *
+   * 典型场景：登录了云端，但在家忘了开代理。这时局域网明明就在眼前，
+   * 不该因为云端不通就整个失败。云端失败后探一下局域网，通就走局域网，
+   * 并告诉用户发生了什么（不静默改变同步方向）。
+   */
+  function runWithFallback() {
+    const first = activeTransport();
+    if (first.id !== 'cloud') return run(first);
+
+    return run(first).catch(function (err) {
+      return health().then(function (h) { return h; }, function () { return null; }).then(function (h) {
+        if (!h) throw err;                       // 局域网也不通，把云端那个错抛回去
+        state.fellBackToLan = true;
+        return run(LAN).then(function (info) {
+          info.fellBack = true;
+          info.firstError = err.message;
+          return info;
+        });
+      });
     });
   }
 
@@ -535,23 +558,25 @@
     // 不要在这里动 state.busy：run() 自己会判断"忙就别进来"，
     // 先置忙会让 run() 直接返回 null，按钮就再也回不来了
     if (state.busy) return;
-    const via = activeTransport();
     el.doBtn.disabled = true;
     const original = el.doBtn.textContent;
     el.doBtn.textContent = '同步中…';
     UI.busy(true, '正在同步…');
 
-    run().then(function (info) {
+    runWithFallback().then(function (info) {
       return LB.calendar.refresh().then(function () { return LB.tier.reload(); }).then(function () {
         UI.busy(false);
         el.doBtn.textContent = original;
         el.doBtn.disabled = false;
         renderStatus();
         renderStats();
-        if (!useCloud()) health().then(function () { renderStatus(); renderStats(); }).catch(function () {});
-        UI.toast('同步完成（' + via.label + '），用时 ' + Math.round((info.ms || 0) / 100) / 10 + ' 秒' +
-          (info.pushedImages ? '，上传 ' + info.pushedImages + ' 张图' : '') +
-          (info.pulledImages ? '，下载 ' + info.pulledImages + ' 张图' : ''), 'ok');
+        if (!useCloud() || info.fellBack) health().then(function () { renderStatus(); renderStats(); }).catch(function () {});
+        const secs = Math.round((info.ms || 0) / 100) / 10;
+        const imgs = (info.pushedImages ? '，上传 ' + info.pushedImages + ' 张图' : '') +
+                     (info.pulledImages ? '，下载 ' + info.pulledImages + ' 张图' : '');
+        UI.toast((info.fellBack
+          ? '云端连不上（多半是没开代理），已改用局域网同步'
+          : '同步完成（' + (info.viaLabel || '同一 WiFi') + '）') + '，用时 ' + secs + ' 秒' + imgs, 'ok');
       });
     }).catch(function (err) {
       UI.busy(false);
@@ -596,6 +621,7 @@
   global.LB.sync = {
     init: init,
     run: run,
+    runWithFallback: runWithFallback,
     health: health,
     state: state,
     useCloud: useCloud,
