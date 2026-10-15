@@ -1,4 +1,4 @@
-/* LifeBoard · 离线缓存
+﻿/* LifeBoard · 离线缓存
  *
  * 策略：**网络优先，断网时才回退到缓存**。
  * 这个应用的目的是"断网也能打开"，不是"加载更快"，所以优先保证拿到最新代码——
@@ -6,7 +6,7 @@
  *
  * 数据全部在 IndexedDB 里，这里只缓存页面本身。
  */
-const CACHE = 'lifeboard-v4';
+const CACHE = 'lifeboard-v5';
 const SHELL = [
   './',
   './index.html',
@@ -17,6 +17,7 @@ const SHELL = [
   './js/holidays.js',
   './js/calendar.js',
   './js/tier.js',
+  './js/cloud.js',
   './js/sync.js',
   './js/app.js',
   './icons/icon-192.png',

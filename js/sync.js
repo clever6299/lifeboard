@@ -127,16 +127,16 @@
     });
   }
 
-  /* ---------------- 同步主流程 ---------------- */
+  /* ---------------- 两条通道 ----------------
+   * 合并规则两边完全一样（updatedAt 比新旧 + 墓碑记录删除），
+   * 区别只在数据怎么运：局域网走本机服务器，云端走 Supabase。
+   * 接口统一成 { sync, getImages, putImages }，run() 不用关心是哪条。
+   */
 
-  function run() {
-    if (state.busy) return Promise.resolve(null);
-    state.busy = true;
-    const started = Date.now();
-    let pushedImages = 0;
-    let pulledImages = 0;
-
-    return collect().then(function (local) {
+  const LAN = {
+    id: 'lan',
+    label: '同一 WiFi',
+    sync: function (local) {
       return fetch(api('sync'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -145,31 +145,72 @@
           tombstones: local.tombstones,
           imageIds: local.imageIds
         })
+      }).then(function (res) {
+        if (!res.ok) throw new Error('同步服务返回 HTTP ' + res.status);
+        return res.json();
+      }).then(function (remote) {
+        if (!remote || !remote.ok) throw new Error((remote && remote.error) || '同步服务返回了意外的内容');
+        return remote;
       });
-    }).then(function (res) {
-      if (!res.ok) throw new Error('同步服务返回 HTTP ' + res.status);
-      return res.json();
-    }).then(function (remote) {
-      if (!remote || !remote.ok) throw new Error((remote && remote.error) || '同步服务返回了意外的内容');
+    },
+    getImages: function (ids) {
+      return fetch(api('images?ids=' + encodeURIComponent(ids.join(','))), { cache: 'no-store' })
+        .then(function (r) {
+          if (!r.ok) throw new Error('取图片失败 HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function (body) { return body.images || {}; });
+    },
+    putImages: function (map) {
+      return fetch(api('images'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images: map })
+      }).then(function (r) { return r.json(); });
+    }
+  };
 
+  const CLOUD = {
+    id: 'cloud',
+    label: '云端',
+    sync: function (local) { return LB.cloud.sync(local); },
+    getImages: function (ids) { return LB.cloud.getImages(ids); },
+    putImages: function (map) { return LB.cloud.putImages(map); }
+  };
+
+  /** 已登录云端就用云端，否则用局域网 */
+  function useCloud() {
+    return !!(global.LB.cloud && LB.cloud.isConfigured() && LB.cloud.isSignedIn());
+  }
+  function activeTransport() { return useCloud() ? CLOUD : LAN; }
+
+  /* ---------------- 同步主流程 ---------------- */
+
+  function run() {
+    if (state.busy) return Promise.resolve(null);
+    state.busy = true;
+    const started = Date.now();
+    const t = activeTransport();
+    let pushedImages = 0;
+    let pulledImages = 0;
+
+    return collect().then(function (local) {
+      return t.sync(local);
+    }).then(function (remote) {
       const pull = remote.missingOnClient || [];
       const push = remote.missingOnServer || [];
 
-      // 先把服务器上多的图片拉下来（后面写元数据时才有本体可用）
+      // 先把另一边多的图片拉下来（后面写元数据时才有本体可用）
       const pullStep = pull.length
-        ? fetch(api('images?ids=' + encodeURIComponent(pull.join(','))), { cache: 'no-store' })
-          .then(function (r) {
-            if (!r.ok) throw new Error('取图片失败 HTTP ' + r.status);
-            return r.json();
-          })
-          .then(function (body) {
+        ? t.getImages(pull)
+          .then(function (images) {
             const metaById = new Map((remote.records.images || []).map(function (r) { return [r.id, r]; }));
             const list = [];
-            Object.keys(body.images || {}).forEach(function (id) {
+            Object.keys(images || {}).forEach(function (id) {
               const meta = metaById.get(id) || { id: id, name: '未命名图片', type: 'image/webp' };
               try {
                 list.push(Object.assign({}, meta, {
-                  blob: LB.image.dataURLToBlob(body.images[id]),
+                  blob: LB.image.dataURLToBlob(images[id]),
                   updatedAt: meta.updatedAt || Date.now()
                 }));
               } catch (err) { /* 跳过坏数据 */ }
@@ -192,11 +233,7 @@
           const ids = Object.keys(payload);
           if (!ids.length) return null;
           pushedImages = ids.length;
-          return fetch(api('images'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ images: payload })
-          }).then(function (r) { return r.json(); });
+          return t.putImages(payload);
         });
       }).then(function () {
         return applyRemote(remote);
@@ -205,6 +242,8 @@
         const info = {
           at: Date.now(),
           ms: Date.now() - started,
+          via: t.id,
+          viaLabel: t.label,
           pushedImages: pushedImages,
           pulledImages: pulledImages,
           serverStats: remote.stats || {},
@@ -229,6 +268,16 @@
     el.stats = UI.$('#syncStats');
     el.hint = UI.$('#syncHint');
     el.doBtn = UI.$('#btnDoSync');
+    el.cloudBox = UI.$('#syncCloudBox');
+    el.cloudForm = UI.$('#syncCloudForm');
+    el.cloudInfo = UI.$('#syncCloudInfo');
+    el.cloudUrl = UI.$('#cloudUrl');
+    el.cloudKey = UI.$('#cloudKey');
+    el.cloudEmail = UI.$('#cloudEmail');
+    el.cloudPass = UI.$('#cloudPass');
+    el.cloudWho = UI.$('#cloudWho');
+    el.cloudMsg = UI.$('#cloudMsg');
+    el.cloudServerStats = UI.$('#cloudServerStats');
   }
 
   function localCountsText(counts) {
@@ -245,8 +294,125 @@
   function isLocalHost() { return location.hostname === 'localhost' || location.hostname === '127.0.0.1'; }
   function isSecure() { return location.protocol === 'https:'; }
 
+  /* ---------------- 云同步那一块 ---------------- */
+
+  function cloudMsg(text, kind) {
+    if (!el.cloudMsg) return;
+    el.cloudMsg.textContent = text || '';
+    el.cloudMsg.style.color = kind === 'err' ? 'var(--red)' : (kind === 'ok' ? 'var(--ink)' : '');
+  }
+
+  function renderCloud() {
+    if (!el.cloudBox) return;
+    const info = LB.cloud.load();
+    const signed = info.signedIn;
+    el.cloudForm.classList.toggle('hidden', signed);
+    el.cloudInfo.classList.toggle('hidden', !signed);
+
+    if (signed) {
+      el.cloudWho.textContent = info.email || '（已登录）';
+    } else if (info.configured) {
+      const cfg = LB.cloud.config();
+      if (!el.cloudUrl.value) el.cloudUrl.value = cfg.url || '';
+      if (!el.cloudKey.value) el.cloudKey.value = cfg.key || '';
+    }
+    // 没配好就把这一块展开，省得用户找不到
+    if (!signed) el.cloudBox.open = true;
+  }
+
+  function cloudSignIn() {
+    const url = el.cloudUrl.value.trim();
+    const key = el.cloudKey.value.trim();
+    const email = el.cloudEmail.value.trim();
+    const pass = el.cloudPass.value;
+    if (!url || !key) { cloudMsg('先把 Project URL 和 Publishable key 填上', 'err'); return; }
+    if (!email || !pass) { cloudMsg('填一下邮箱和密码', 'err'); return; }
+
+    LB.cloud.saveConfig(url, key);
+    cloudMsg('正在登录…');
+    LB.cloud.signIn(email, pass).then(function () {
+      cloudMsg('登录成功', 'ok');
+      el.cloudPass.value = '';
+      renderCloud();
+      renderStatus();
+      renderStats();
+      UI.toast('已登录云同步：' + LB.cloud.userEmail(), 'ok');
+    }).catch(function (err) {
+      cloudMsg('登录失败：' + err.message, 'err');
+    });
+  }
+
+  function cloudSignUp() {
+    const url = el.cloudUrl.value.trim();
+    const key = el.cloudKey.value.trim();
+    const email = el.cloudEmail.value.trim();
+    const pass = el.cloudPass.value;
+    if (!url || !key) { cloudMsg('先把 Project URL 和 Publishable key 填上', 'err'); return; }
+    if (!email || !pass) { cloudMsg('填一下邮箱和密码（至少 6 位）', 'err'); return; }
+    if (pass.length < 6) { cloudMsg('Supabase 默认要求密码至少 6 位', 'err'); return; }
+
+    LB.cloud.saveConfig(url, key);
+    cloudMsg('正在注册…');
+    LB.cloud.signUp(email, pass).then(function (res) {
+      if (res && res.needsConfirm) {
+        cloudMsg('注册成功，但项目开着"邮件确认"——去邮箱点一下确认链接，或者到 Supabase 的 Authentication 里关掉 Confirm email', 'err');
+        return;
+      }
+      cloudMsg('注册并登录成功', 'ok');
+      el.cloudPass.value = '';
+      renderCloud();
+      renderStatus();
+      renderStats();
+      UI.toast('云同步账号已建好', 'ok');
+    }).catch(function (err) {
+      cloudMsg('注册失败：' + err.message, 'err');
+    });
+  }
+
+  function cloudSignOut() {
+    LB.cloud.signOut().then(function () {
+      renderCloud();
+      cloudMsg('');
+      renderStatus();
+      renderStats();
+      UI.toast('已退出云同步，回到局域网方式', 'ok');
+    });
+  }
+
+  function cloudForget() {
+    UI.confirm({
+      title: '清除云同步配置',
+      html: '<p>只会清掉本机保存的项目地址、密钥和登录状态。</p>' +
+            '<p class="muted small">云端已有的数据不会被删除；本机数据也不动。</p>',
+      okLabel: '清除'
+    }).then(function (ok) {
+      if (!ok) return;
+      LB.cloud.signOut().then(function () {
+        LB.cloud.clearConfig();
+        el.cloudUrl.value = '';
+        el.cloudKey.value = '';
+        renderCloud();
+        cloudMsg('已清除', 'ok');
+        renderStatus();
+        renderStats();
+      });
+    });
+  }
+
+  /* ---------------- 状态 ---------------- */
+
   function renderStatus() {
     if (!el.status) return;
+
+    // 云端优先：登录了就用云端，局域网那条自动退居备用
+    if (useCloud()) {
+      el.status.innerHTML = '<p class="sync-good"><strong>云端同步已就绪</strong></p>' +
+        '<p class="muted small">当前走云端：随时随地都能同步，不用开电脑，也不用装证书。' +
+        '退出登录就会自动切回局域网方式。</p>';
+      el.address.classList.add('hidden');
+      el.doBtn.disabled = state.busy;
+      return;
+    }
 
     if (!state.health) {
       // 连不上：分情况说清楚，别让人猜
@@ -261,7 +427,7 @@
         why = '请确认电脑上的服务正在运行，并且本页是从电脑的地址打开的。';
       }
       el.status.innerHTML = '<p class="sync-bad"><strong>现在连不上电脑上的同步服务。</strong></p>' +
-        '<p class="muted small">' + UI.esc(why) + '</p>';
+        '<p class="muted small">' + UI.esc(why) + ' 想随时随地同步的话，把下面的「云同步」配上就行。</p>';
       el.address.classList.add('hidden');
       el.doBtn.disabled = true;
       return;
@@ -302,36 +468,64 @@
 
   function renderStats() {
     if (!el.stats) return;
-    const serverCounts = (state.health && state.health.stats) || {};
     const parts = [];
-    parts.push('<p class="muted small">电脑上：' + localCountsText(serverCounts) + '</p>');
+
+    if (useCloud()) {
+      const s = (state.last && state.last.via === 'cloud' && state.last.serverStats) || null;
+      parts.push('<p class="muted small">云端账号：' + UI.esc(LB.cloud.userEmail() || '已登录') + '</p>');
+      if (s) {
+        parts.push('<p class="muted small">云端上：任务 ' + (s.tasks || 0) + '，常用 ' + (s.templates || 0) +
+          '，榜单 ' + (s.boards || 0) + '，卡片 ' + (s.items || 0) + '，图片 ' + (s.images || 0) + '</p>');
+      } else {
+        parts.push('<p class="muted small">云端上的数据量，点一次同步就会显示。</p>');
+      }
+    } else {
+      const serverCounts = (state.health && state.health.stats) || {};
+      parts.push('<p class="muted small">电脑上：' + localCountsText(serverCounts) + '</p>');
+    }
+
     if (state.last) {
       parts.push('<p class="muted small">上次同步：' + UI.esc(whenText(state.last.at)) +
-        '（上传图片 ' + (state.last.pushedImages || 0) + ' 张，下载图片 ' + (state.last.pulledImages || 0) + ' 张）</p>');
+        (state.last.viaLabel ? '（' + UI.esc(state.last.viaLabel) + '）' : '') +
+        '，上传图片 ' + (state.last.pushedImages || 0) + ' 张，下载图片 ' + (state.last.pulledImages || 0) + ' 张</p>');
     } else {
       parts.push('<p class="muted small">这台设备还没有同步过。</p>');
     }
     el.stats.innerHTML = parts.join('');
   }
 
+  function fillLocalHint() {
+    return LB.store.counts().then(function (counts) {
+      if (el.hint) el.hint.textContent = '这台设备上：' + localCountsText(counts);
+    });
+  }
+
   function openDialog() {
     UI.openModal('syncModal');
-    if (el.status) el.status.innerHTML = '<p class="muted small">正在检测同步服务…</p>';
+    renderCloud();
+    if (el.status) el.status.innerHTML = '<p class="muted small">正在检测…</p>';
     if (el.address) el.address.classList.add('hidden');
     if (el.doBtn) el.doBtn.disabled = true;
+
+    if (useCloud()) {
+      renderStatus();
+      renderStats();
+      fillLocalHint();
+      return;
+    }
 
     health().then(function () {
       renderStatus();
       renderStats();
-      LB.store.counts().then(function (counts) {
-        if (el.hint) el.hint.textContent = '这台设备上：' + localCountsText(counts);
-      });
+      fillLocalHint();
     }).catch(function (err) {
       state.health = null;
       renderStatus();
+      renderStats();
+      fillLocalHint();
       if (el.hint) {
         el.hint.textContent = (isSecure() && !isLanHost() && !isLocalHost())
-          ? '想同步的话，用电脑的局域网地址打开本页即可。'
+          ? '想同步的话，用电脑的局域网地址打开本页，或者在上面配好「云同步」。'
           : '检测失败：' + err.message;
       }
     });
@@ -341,6 +535,7 @@
     // 不要在这里动 state.busy：run() 自己会判断"忙就别进来"，
     // 先置忙会让 run() 直接返回 null，按钮就再也回不来了
     if (state.busy) return;
+    const via = activeTransport();
     el.doBtn.disabled = true;
     const original = el.doBtn.textContent;
     el.doBtn.textContent = '同步中…';
@@ -351,8 +546,10 @@
         UI.busy(false);
         el.doBtn.textContent = original;
         el.doBtn.disabled = false;
-        health().then(function () { renderStatus(); renderStats(); }).catch(function () {});
-        UI.toast('同步完成，用时 ' + Math.round((info.ms || 0) / 100) / 10 + ' 秒' +
+        renderStatus();
+        renderStats();
+        if (!useCloud()) health().then(function () { renderStatus(); renderStats(); }).catch(function () {});
+        UI.toast('同步完成（' + via.label + '），用时 ' + Math.round((info.ms || 0) / 100) / 10 + ' 秒' +
           (info.pushedImages ? '，上传 ' + info.pushedImages + ' 张图' : '') +
           (info.pulledImages ? '，下载 ' + info.pulledImages + ' 张图' : ''), 'ok');
       });
@@ -378,10 +575,21 @@
   function init() {
     cacheEls();
     loadLast();
+    LB.cloud.load();
     state.ready = true;
     UI.$('#btnSync').addEventListener('click', openDialog);
     el.doBtn.addEventListener('click', doSync);
     UI.$('#btnCopyAddr').addEventListener('click', copyAddress);
+    UI.$('#btnCloudSignIn').addEventListener('click', cloudSignIn);
+    UI.$('#btnCloudSignUp').addEventListener('click', cloudSignUp);
+    UI.$('#btnCloudSignOut').addEventListener('click', cloudSignOut);
+    UI.$('#btnCloudForget').addEventListener('click', cloudForget);
+    UI.$('#btnCloudForget2').addEventListener('click', cloudForget);
+    if (el.cloudPass) {
+      el.cloudPass.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') { ev.preventDefault(); cloudSignIn(); }
+      });
+    }
   }
 
   global.LB = global.LB || {};
@@ -390,6 +598,8 @@
     run: run,
     health: health,
     state: state,
+    useCloud: useCloud,
+    activeTransport: activeTransport,
     lastSync: function () { return state.last; }
   };
 })(window);

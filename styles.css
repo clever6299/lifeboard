@@ -692,6 +692,28 @@ table.tier-table .tt-comment { color: var(--ink-2); max-width: 300px; }
 .sync-stats p { margin: 0 0 4px; }
 #syncHint { min-height: 18px; }
 
+/* 云同步那一块：默认折叠，没配好时自动展开 */
+.sync-cloud {
+  margin: 14px 0;
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet-sunk);
+}
+.sync-cloud > summary {
+  cursor: pointer; list-style: none;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 11px 13px; font-size: 13.5px; font-weight: 600;
+}
+.sync-cloud > summary::-webkit-details-marker { display: none; }
+.sync-cloud > summary::before { content: "▸"; color: var(--ink-3); font-size: 11px; }
+.sync-cloud[open] > summary::before { content: "▾"; }
+.sync-cloud[open] > summary { border-bottom: 1px solid var(--rule); }
+.sync-cloud > summary span { font-weight: 400; }
+.sync-cloud > div { padding: 12px 13px 13px; }
+.sync-cloud .field-label { margin-top: 10px; }
+.sync-cloud p code { font-size: 11.5px; }
+.sync-cloud input { margin-bottom: 2px; }
+#cloudMsg { margin: 10px 0 0; min-height: 17px; }
+
 /* ---------- 弹窗 ---------- */
 .modal {
   position: fixed; inset: 0; z-index: 80;
