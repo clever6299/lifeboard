@@ -804,3 +804,43 @@ table.tier-table .tt-comment { color: var(--ink-2); max-width: 300px; }
   border: 3px solid var(--paper);
 }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ==========================================================================
+   iOS / 触屏适配
+   ==========================================================================
+   只在触屏设备上生效（pointer: coarse），桌面端用鼠标时保持原有的紧凑尺寸。
+
+   1) iOS Safari 聚焦字号小于 16px 的输入框时，会把整个页面自动放大，
+      用户点一下"添加任务"页面就跳一下。输入框统一到 16px 就根治了。
+   2) 触屏上的可点区域撑到 44px 上下（苹果人机界面指南），避免误触。
+   3) iOS 地址栏收缩时 vh 不变，弹窗会溢出屏幕；dvh 跟随可见区域。
+*/
+
+@media (pointer: coarse), (max-width: 640px) {
+  input[type="text"], input[type="date"], input[type="search"], select, textarea {
+    font-size: 16px;
+  }
+  .jump input { font-size: 16px; }
+}
+
+@media (pointer: coarse) {
+  .icon-btn { width: 44px; height: 44px; font-size: 17px; }
+  .linkbtn { min-height: 44px; padding: 10px 10px; font-size: 15px; }
+  .tab { min-height: 44px; display: inline-flex; align-items: center; padding-top: 0; padding-bottom: 0; }
+  .btn { min-height: 44px; padding: 10px 15px; }
+  .btn.small { min-height: 40px; padding: 8px 12px; font-size: 13.5px; }
+  .mini { min-height: 44px; padding: 11px 10px; font-size: 13px; }
+  .swatch { width: 44px; height: 44px; }
+  .tpl-del { padding: 14px 14px 14px 8px; }
+  .tier-label .tl-tools { flex-wrap: wrap; justify-content: center; gap: 3px; }
+  .tier-label .tl-tools button { min-width: 30px; min-height: 30px; font-size: 12px; padding: 5px 6px; }
+  input[type="checkbox"] { width: 22px; height: 22px; }
+  input[type="checkbox"]:checked::after { left: 6px; top: 2px; width: 6px; height: 11px; }
+  .stars button { font-size: 32px; padding: 2px 4px; }
+}
+
+@supports (height: 100dvh) {
+  .task-list { max-height: 48dvh; }
+  .modal-card { max-height: 88dvh; }
+  .item-detail .preview img { max-height: 46dvh; }
+}
