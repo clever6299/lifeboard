@@ -205,12 +205,22 @@
 
   /** 合并云端与本机：返回合并结果，以及需要推上去的记录 */
   function mergeBoth(localRecords, cloudRecords, localTombs, cloudTombs) {
-    // 墓碑：两边取 deletedAt 大的
+    // 墓碑：两边取 deletedAt 大的。
+    // 必须统一补上 id——云端拉回来的是 {store, recordId, deletedAt}，
+    // 而本地 tombstones store 用 id 当主键，少了它写回时会报
+    // DataError: key path did not yield a value
     const tombs = new Map();
     const putTomb = function (t) {
+      if (!t || !t.store || !t.recordId) return;
       const key = t.store + '|' + t.recordId;
+      const rec = {
+        id: key,
+        store: t.store,
+        recordId: t.recordId,
+        deletedAt: Number(t.deletedAt) || 0
+      };
       const prev = tombs.get(key);
-      if (!prev || (Number(t.deletedAt) || 0) > (Number(prev.deletedAt) || 0)) tombs.set(key, t);
+      if (!prev || rec.deletedAt > prev.deletedAt) tombs.set(key, rec);
     };
     cloudTombs.forEach(putTomb);
     localTombs.forEach(putTomb);
