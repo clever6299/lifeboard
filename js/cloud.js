@@ -104,11 +104,22 @@
     if (opt.auth !== false && state.session && state.session.access_token) {
       headers.Authorization = 'Bearer ' + state.session.access_token;
     }
-    const res = await fetch(endpoint(path), {
-      method: opt.method || 'GET',
-      headers: headers,
-      body: opt.body
-    });
+    let res;
+    try {
+      res = await fetch(endpoint(path), {
+        method: opt.method || 'GET',
+        headers: headers,
+        body: opt.body
+      });
+    } catch (netErr) {
+      // fetch 抛异常 = 请求根本没发出去（DNS 被重置 / 连不上）。
+      // 国内访问 supabase.co 需要代理，必须说清楚，否则用户只看到一句
+      // "Failed to fetch"，完全不知道要去开 VPN。
+      const err = new Error('连不上 Supabase。国内访问 supabase.co 需要开代理（VPN），打开后重试即可；本机数据不受影响。');
+      err.network = true;
+      err.cause = netErr;
+      throw err;
+    }
     if (!res.ok) {
       const detail = await readError(res);
       const err = new Error(detail);
