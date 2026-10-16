@@ -245,5 +245,31 @@
       '-' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
   };
 
+  /* ---------------- 界面偏好 ----------------
+   * 只存在本机，不参与同步：这类偏好是"这台设备看起来什么样"，
+   * 没必要跟着业务数据跑到别的设备上去。
+   */
+  const PREFS_KEY = 'lifeboard.prefs';
+  let prefsCache = null;
+
+  function loadPrefs() {
+    if (prefsCache) return prefsCache;
+    try { prefsCache = JSON.parse(global.localStorage.getItem(PREFS_KEY) || '{}') || {}; }
+    catch (err) { prefsCache = {}; }
+    return prefsCache;
+  }
+
+  UI.pref = function (name, fallback) {
+    const p = loadPrefs();
+    return Object.prototype.hasOwnProperty.call(p, name) ? p[name] : fallback;
+  };
+
+  UI.setPref = function (name, value) {
+    const p = loadPrefs();
+    p[name] = value;
+    try { global.localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (err) { /* 忽略 */ }
+    return value;
+  };
+
   global.UI = UI;
 })(window);

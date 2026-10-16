@@ -85,13 +85,31 @@
     if (box) box.textContent = LB.tier.currentBoardName();
   }
 
+  /** 打开设置时，把单选按钮同步成当前偏好 */
+  function syncWeekStartRadios() {
+    const current = Number(UI.pref('weekStart', 0)) === 1 ? '1' : '0';
+    UI.$$('input[name="weekStart"]').forEach(function (radio) {
+      radio.checked = radio.value === current;
+    });
+  }
+
   function bindSettings() {
     UI.$('#btnSettings').addEventListener('click', function () {
       UI.openModal('settingsModal');
+      syncWeekStartRadios();
       refreshStorageInfo();
       refreshBoardName();
     });
     UI.$('#btnRefreshStorage').addEventListener('click', refreshStorageInfo);
+
+    /* 每周从哪天开始 */
+    UI.$$('input[name="weekStart"]').forEach(function (radio) {
+      radio.addEventListener('change', function () {
+        if (!radio.checked) return;
+        UI.setPref('weekStart', Number(radio.value));
+        LB.calendar.refresh();
+      });
+    });
 
     /* 恢复默认档位 */
     UI.$('#btnRestoreTiers').addEventListener('click', function () {

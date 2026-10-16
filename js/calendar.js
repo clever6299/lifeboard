@@ -23,8 +23,33 @@
     return set;
   })();
 
+  /* ---------------- 每周从哪天开始 ----------------
+   * 0 = 周日在前，1 = 周一在前。默认周日。
+   * 这是本机界面偏好，只影响这台设备怎么显示，不参与同步。
+   * 注意：判断"是不是周末"用的是 getDay()，跟列位置无关，
+   * 所以换起始日不会把周末标错。
+   */
+  const WEEK_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
+
+  function weekStart() {
+    return Number(UI.pref('weekStart', 0)) === 1 ? 1 : 0;
+  }
+
+  function renderWeekdays() {
+    if (!el.weekdays) return;
+    const start = weekStart();
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+      const dow = (start + i) % 7;
+      // 周日和周六标红，跟格子里的周末底色对得上
+      html += '<span' + (dow === 0 || dow === 6 ? ' class="wk"' : '') + '>' + WEEK_LABELS[dow] + '</span>';
+    }
+    el.weekdays.innerHTML = html;
+  }
+
   function cacheEls() {
     el.grid = UI.$('#calGrid');
+    el.weekdays = UI.$('#calWeekdays');
     el.title = UI.$('#calTitle');
     el.stats = UI.$('#calStats');
     el.jump = UI.$('#calJump');
@@ -96,9 +121,10 @@
     const month = cursor.getMonth();
     el.title.textContent = year + '年' + (month + 1) + '月';
     if (el.jump && el.jump.value !== state.selected) el.jump.value = state.selected;
+    renderWeekdays();
 
     const first = new Date(year, month, 1);
-    const offset = (first.getDay() + 6) % 7;              // 周一为第一列
+    const offset = (first.getDay() - weekStart() + 7) % 7;   // 按偏好决定第一列是哪天
     const start = new Date(year, month, 1 - offset);
     const todayKey = UI.todayKey();
     const map = byDateMap();

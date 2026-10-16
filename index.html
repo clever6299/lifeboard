@@ -58,8 +58,8 @@
           </label>
         </div>
 
-        <div class="weekdays" aria-hidden="true">
-          <span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span class="wk">六</span><span class="wk">日</span>
+        <div class="weekdays" id="calWeekdays" aria-hidden="true">
+          <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span class="wk">六</span>
         </div>
         <div class="grid" id="calGrid" role="grid" aria-label="月历"></div>
 
@@ -263,6 +263,15 @@
       <button class="icon-btn" data-close="settingsModal" aria-label="关闭">✕</button>
     </div>
     <div class="modal-body">
+
+      <section class="set-block">
+        <h3>日历显示</h3>
+        <p class="muted small">
+          每周的第一天放在哪一列。这个设置只影响这台设备，不会同步到别的设备上。
+        </p>
+        <label class="radio"><input type="radio" name="weekStart" value="0" /> <span>周日在前　日 一 二 三 四 五 六</span></label>
+        <label class="radio"><input type="radio" name="weekStart" value="1" /> <span>周一在前　一 二 三 四 五 六 日</span></label>
+      </section>
 
       <section class="set-block">
         <h3>备份与恢复</h3>
